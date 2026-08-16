@@ -58,6 +58,6 @@ func TestLiveCashTransactions(t *testing.T) {
 	}
 	t.Logf("%d transactions, hasNextPage=%v", len(page.Transactions), page.PageInfo.HasNextPage)
 	for _, tx := range page.Transactions {
-		t.Logf("  %s %d cents %s (%s)", tx.ID, tx.AmountCents, tx.Description, tx.Status)
+		t.Logf("  %s %d cents %s (%s)", tx.ID, tx.AmountCents, tx.Payee(), tx.Status)
 	}
 }

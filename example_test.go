@@ -71,14 +71,14 @@ func Example_transactions() {
 		panic(err)
 	}
 	for _, tx := range page.Transactions {
-		fmt.Printf("%s %d %s\n", tx.ID, tx.AmountCents, tx.Description)
+		fmt.Printf("%s %d %s\n", tx.ID, tx.AmountCents, tx.Payee())
 	}
 
 	for tx, err := range client.AllCashTransactions(ctx, &crew.CashTransactionFilter{TransferSide: crew.TransferSideDebit}) {
 		if err != nil {
 			panic(err)
 		}
-		fmt.Println(tx.Description)
+		fmt.Println(tx.Payee())
 	}
 }
 
@@ -90,7 +90,7 @@ func Example_watcher() {
 	)
 
 	client.OnTransaction(func(tx crew.CashTransaction) {
-		fmt.Printf("new transaction: %s (%d cents)\n", tx.Description, tx.AmountCents)
+		fmt.Printf("new transaction: %s (%d cents)\n", tx.Payee(), tx.AmountCents)
 	})
 	client.OnTransactionUpdate(func(tx crew.CashTransaction) {
 		fmt.Printf("transaction %s is now %s\n", tx.ID, tx.Status)

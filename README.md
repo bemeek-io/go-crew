@@ -11,7 +11,7 @@ An unofficial Go client for the [Crew Finance](https://www.trycrew.com) consumer
 
 ## Raw API Reference
 
-Not using Go? The reverse-engineered protocol notes in [docs/api.md](docs/api.md) document the auth flow and GraphQL operations directly.
+Crew publishes a GraphQL reference at [docs.trycrew.com](https://docs.trycrew.com/), but its field names don't always match the live schema. The protocol notes in [docs/api.md](docs/api.md) document the auth flow, the GraphQL operations this SDK uses, and which parts have been validated against the live API — useful even if you're not using Go.
 
 ## Installation
 
@@ -61,10 +61,10 @@ func main() {
 
 	// Get notified when transactions occur or clear.
 	client.OnTransaction(func(tx crew.CashTransaction) {
-		fmt.Printf("new: %s $%.2f\n", tx.Description, float64(-tx.AmountCents)/100)
+		fmt.Printf("new: %s $%.2f\n", tx.Payee(), float64(-tx.AmountCents)/100)
 	})
 	client.OnTransactionUpdate(func(tx crew.CashTransaction) {
-		fmt.Printf("update: %s is now %s\n", tx.Description, tx.Status)
+		fmt.Printf("update: %s is now %s\n", tx.Payee(), tx.Status)
 	})
 	if err := client.StartWatching(ctx); err != nil {
 		panic(err)
@@ -163,6 +163,8 @@ Handlers run synchronously on the watch goroutine — spawn your own goroutine f
 | `UpdateCashTransaction(ctx, in)` | Edit a transaction's description. |
 | `ReassignCashTransaction(ctx, txID, subID)` | Move a transaction to another pocket. |
 | `SplitCashTransaction(ctx, in)` | Split a transaction across pockets. |
+
+Each `CashTransaction` carries rich detail: use **`Payee()`** for the display name (the enriched `Title`, e.g. "Costco" — `MerchantName` and `Description` are usually null on card transactions), plus `MCC`, merchant address fields, `ImageURL` (merchant logo), `Note`/`Memo`, `OccurredAt`/`ClearedAt`, running balance totals, and the associated `Subaccount` and `DebitCard`.
 
 ### Transfers
 
