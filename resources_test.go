@@ -265,13 +265,13 @@ func TestUpdateCashTransaction(t *testing.T) {
 
 func TestReassignCashTransaction(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("reassignCashTransaction", `{"data":{"reassignCashTransaction":{"result":{"id":"tx-1","subaccountId":"sub-2"}}}}`)
+	f.setGQL("reassignCashTransaction", `{"data":{"reassignCashTransaction":{"result":{"id":"tx-1","subaccount":{"id":"sub-2"}}}}}`)
 
 	tx, err := c.ReassignCashTransaction(context.Background(), "tx-1", "sub-2")
 	if err != nil {
 		t.Fatalf("ReassignCashTransaction: %v", err)
 	}
-	if tx.SubaccountID != "sub-2" {
+	if tx.Subaccount == nil || tx.Subaccount.ID != "sub-2" {
 		t.Errorf("tx = %+v", tx)
 	}
 	input := f.lastRequest().Variables["input"].(map[string]any)

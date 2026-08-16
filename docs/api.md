@@ -2,7 +2,7 @@
 
 Reverse-engineered notes on the Crew Finance consumer API, for anyone building against it without this SDK. Sources: Crew's GraphQL reference at `https://docs.trycrew.com/` (SpectaQL, v1.0.0) and a working third-party integration. Crew issues no public schema file; treat everything here as subject to change.
 
-**Validation status:** the GraphQL endpoint, bearer auth, response envelope, and the subaccount fields `id`, `name`, `overallBalance`, `goal` are confirmed against a working integration. The OTP auth flow, mutation shapes, and remaining field names come from Crew's docs and have not been exercised live. The docs are internally inconsistent about the auth base path (`/willow/auth/...` in curl examples vs `/willow/graphql/auth/...` in prose); this SDK defaults to `/willow/auth`.
+**Validation status:** confirmed against the live API (2026-08-16): the GraphQL endpoint, the full 4-step OTP auth flow at the `/willow/auth` base (settling the docs' `/willow/auth` vs `/willow/graphql/auth` inconsistency), bearer auth, the response envelope, the `currentUser` accounts/subaccounts query (`overallBalance`, `goal`), and the `cashTransactions` field names below. `CashTransaction` notably has **no** `createdAt` or `date` field — timestamps are `occurredAt` and nullable `clearedAt`; `subaccount` and `debitCard` are nested objects, not ID scalars; and the connection's filter argument is `searchFilters`, not `filter`. Mutation input shapes and transfer fields still come from Crew's docs and have not been exercised live.
 
 ## Base URLs
 
@@ -43,7 +43,7 @@ If step 2 reports `"isSingleFactor": true`, steps 3–4 are unnecessary.
 
 ## Pagination
 
-Relay cursor connections: arguments `first`, `last`, `after`, `before`, plus an optional `filter` input; responses carry `edges { node }` and `pageInfo { startCursor endCursor hasNextPage hasPreviousPage }`.
+Relay cursor connections: arguments `first`, `last`, `after`, `before`, plus an optional `searchFilters` input (validated on `cashTransactions`; assumed on `transfers`); responses carry `edges { node }` and `pageInfo { startCursor endCursor hasNextPage hasPreviousPage }`.
 
 Known filters:
 
@@ -64,8 +64,8 @@ query VirtualDebitCards { currentUser { virtualDebitCards { id last4 status froz
 
 query CashTransactions($first: Int, $last: Int, $after: String, $before: String, $filter: CashTransactionFilter) {
   currentUser {
-    cashTransactions(first: $first, last: $last, after: $after, before: $before, filter: $filter) {
-      edges { node { id amount description status type merchantName subaccountId debitCardId date createdAt } }
+    cashTransactions(first: $first, last: $last, after: $after, before: $before, searchFilters: $filter) {
+      edges { node { id amount description status type merchantName merchantCity merchantState occurredAt clearedAt subaccount { id name } debitCard { id } } }
       pageInfo { startCursor endCursor hasNextPage hasPreviousPage }
     }
   }
@@ -73,7 +73,7 @@ query CashTransactions($first: Int, $last: Int, $after: String, $before: String,
 
 query Transfers($first: Int, $last: Int, $after: String, $before: String, $filter: TransferFilter) {
   currentUser {
-    transfers(first: $first, last: $last, after: $after, before: $before, filter: $filter) {
+    transfers(first: $first, last: $last, after: $after, before: $before, searchFilters: $filter) {
       edges { node { id amount status type memo errorCode isCancellable occurredAt } }
       pageInfo { startCursor endCursor hasNextPage hasPreviousPage }
     }

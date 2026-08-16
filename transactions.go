@@ -5,11 +5,11 @@ import (
 	"iter"
 )
 
-const cashTransactionFields = `id amount description status type merchantName subaccountId debitCardId date createdAt`
+const cashTransactionFields = `id amount description status type merchantName merchantCity merchantState occurredAt clearedAt subaccount { id name } debitCard { id }`
 
 const queryCashTransactions = `query CashTransactions($first: Int, $last: Int, $after: String, $before: String, $filter: CashTransactionFilter) {
   currentUser {
-    cashTransactions(first: $first, last: $last, after: $after, before: $before, filter: $filter) {
+    cashTransactions(first: $first, last: $last, after: $after, before: $before, searchFilters: $filter) {
       edges { node { ` + cashTransactionFields + ` } }
       pageInfo { startCursor endCursor hasNextPage hasPreviousPage }
     }

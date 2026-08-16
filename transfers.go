@@ -9,7 +9,7 @@ const transferFields = `id amount status type memo errorCode isCancellable occur
 
 const queryTransfers = `query Transfers($first: Int, $last: Int, $after: String, $before: String, $filter: TransferFilter) {
   currentUser {
-    transfers(first: $first, last: $last, after: $after, before: $before, filter: $filter) {
+    transfers(first: $first, last: $last, after: $after, before: $before, searchFilters: $filter) {
       edges { node { ` + transferFields + ` } }
       pageInfo { startCursor endCursor hasNextPage hasPreviousPage }
     }

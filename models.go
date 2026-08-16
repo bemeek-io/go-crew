@@ -140,16 +140,20 @@ type Subaccount struct {
 
 // CashTransaction is a money movement on a Crew account.
 type CashTransaction struct {
-	ID           string    `json:"id"`
-	AmountCents  int64     `json:"amount"`
-	Description  string    `json:"description"`
-	Status       string    `json:"status"`
-	Type         string    `json:"type"`
-	MerchantName string    `json:"merchantName"`
-	SubaccountID string    `json:"subaccountId"`
-	DebitCardID  string    `json:"debitCardId"`
-	Date         Date      `json:"date"`
-	CreatedAt    time.Time `json:"createdAt"`
+	ID            string     `json:"id"`
+	AmountCents   int64      `json:"amount"`
+	Description   string     `json:"description"`
+	Status        string     `json:"status"`
+	Type          string     `json:"type"`
+	MerchantName  string     `json:"merchantName"`
+	MerchantCity  string     `json:"merchantCity"`
+	MerchantState string     `json:"merchantState"`
+	OccurredAt    time.Time  `json:"occurredAt"`
+	ClearedAt     *time.Time `json:"clearedAt"`
+	// Subaccount and DebitCard carry only the fields the SDK queries
+	// (id and name); they are nil when the transaction has none.
+	Subaccount *Subaccount `json:"subaccount"`
+	DebitCard  *DebitCard  `json:"debitCard"`
 }
 
 // Transfer is a movement of funds between accounts or subaccounts.

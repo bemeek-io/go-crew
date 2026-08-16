@@ -78,10 +78,12 @@ func TestCashTransactionUnmarshal(t *testing.T) {
 		"status": "CLEARED",
 		"type": "PURCHASE",
 		"merchantName": "Cafe",
-		"subaccountId": "sub-1",
-		"debitCardId": "card-1",
-		"date": "2026-08-16",
-		"createdAt": "2026-08-16T12:30:00Z"
+		"merchantCity": "Lehi",
+		"merchantState": "UT",
+		"occurredAt": "2026-08-16T12:30:00Z",
+		"clearedAt": null,
+		"subaccount": {"id": "sub-1", "name": "Groceries"},
+		"debitCard": {"id": "card-1"}
 	}`
 	var tx CashTransaction
 	if err := json.Unmarshal([]byte(raw), &tx); err != nil {
@@ -90,8 +92,14 @@ func TestCashTransactionUnmarshal(t *testing.T) {
 	if tx.ID != "tx-1" || tx.AmountCents != -1250 || tx.Status != "CLEARED" {
 		t.Errorf("tx = %+v", tx)
 	}
-	if tx.CreatedAt.Hour() != 12 || tx.Date.Day() != 16 {
-		t.Errorf("timestamps = %v / %v", tx.CreatedAt, tx.Date)
+	if tx.OccurredAt.Hour() != 12 || tx.ClearedAt != nil {
+		t.Errorf("timestamps = %v / %v", tx.OccurredAt, tx.ClearedAt)
+	}
+	if tx.Subaccount == nil || tx.Subaccount.ID != "sub-1" {
+		t.Errorf("subaccount = %+v", tx.Subaccount)
+	}
+	if tx.DebitCard == nil || tx.DebitCard.ID != "card-1" {
+		t.Errorf("debitCard = %+v", tx.DebitCard)
 	}
 }
 
