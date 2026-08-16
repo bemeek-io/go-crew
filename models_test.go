@@ -74,14 +74,18 @@ func TestCashTransactionUnmarshal(t *testing.T) {
 	raw := `{
 		"id": "tx-1",
 		"amount": -1250,
-		"description": "Coffee",
+		"title": "Cafe",
+		"description": null,
 		"status": "CLEARED",
-		"type": "PURCHASE",
-		"merchantName": "Cafe",
+		"type": "CARD",
+		"mcc": "5812",
+		"merchantName": null,
 		"merchantCity": "Lehi",
 		"merchantState": "UT",
-		"occurredAt": "2026-08-16T12:30:00Z",
+		"occurredAt": "2026-08-16T12:30:00.551000Z",
 		"clearedAt": null,
+		"subaccountRunningTotal": 24500,
+		"accountRunningTotal": 900000,
 		"subaccount": {"id": "sub-1", "name": "Groceries"},
 		"debitCard": {"id": "card-1"}
 	}`
@@ -100,6 +104,24 @@ func TestCashTransactionUnmarshal(t *testing.T) {
 	}
 	if tx.DebitCard == nil || tx.DebitCard.ID != "card-1" {
 		t.Errorf("debitCard = %+v", tx.DebitCard)
+	}
+	if tx.Payee() != "Cafe" {
+		t.Errorf("Payee() = %q, want Cafe", tx.Payee())
+	}
+	if tx.SubaccountRunningTotalCents != 24500 || tx.AccountRunningTotalCents != 900000 {
+		t.Errorf("running totals = %d / %d", tx.SubaccountRunningTotalCents, tx.AccountRunningTotalCents)
+	}
+}
+
+func TestPayeeFallbacks(t *testing.T) {
+	if got := (CashTransaction{Title: "T", MerchantName: "M", Description: "D"}).Payee(); got != "T" {
+		t.Errorf("Payee() = %q, want T", got)
+	}
+	if got := (CashTransaction{MerchantName: "M", Description: "D"}).Payee(); got != "M" {
+		t.Errorf("Payee() = %q, want M", got)
+	}
+	if got := (CashTransaction{Description: "D"}).Payee(); got != "D" {
+		t.Errorf("Payee() = %q, want D", got)
 	}
 }
 

@@ -65,7 +65,7 @@ query VirtualDebitCards { currentUser { virtualDebitCards { id last4 status froz
 query CashTransactions($first: Int, $last: Int, $after: String, $before: String, $filter: CashTransactionFilter) {
   currentUser {
     cashTransactions(first: $first, last: $last, after: $after, before: $before, searchFilters: $filter) {
-      edges { node { id amount description status type merchantName merchantCity merchantState occurredAt clearedAt subaccount { id name } debitCard { id } } }
+      edges { node { id amount title description status type mcc merchantName merchantAddress1 merchantCity merchantState merchantZip merchantCountry imageUrl note memo externalId occurredAt clearedAt subaccountRunningTotal accountRunningTotal subaccount { id name } debitCard { id } } }
       pageInfo { startCursor endCursor hasNextPage hasPreviousPage }
     }
   }
@@ -91,6 +91,15 @@ Mutations (each `(input: $input)`, returning `{ result { ...fields } }`):
 - Cards: `freezeDebitCard`, `unfreezeDebitCard`, `cancelDebitCard`, `activateDebitCards`, `createVirtualDebitCard`, `updateVirtualDebitCard`
 
 Enums (observed/documented values): `SubaccountType` = BILL, BILL_RESERVE, CREDIT, CREDIT_RESERVE, SAVINGS, SPENDING; `TransferStatus` = CANCELED, CANCELING, COMPLETED, DECISION_ACCEPTED, DECISION_MANUAL_REVIEW, DECISION_PENDING, DECISION_REJECTED, DECISION_RETRYING; `TransferType` = ACH, ADJUSTMENT, ALLOWANCE, BILL_SUBACCOUNT, BONUS, BOOK, CASH_DEPOSIT, CHECK, …
+
+## CashTransaction schema notes (live-validated 2026-08-16)
+
+- Schema introspection (`__type`) is **disabled** in production (returns `forbidden`); the fields below were discovered by probing and reading the server's "did you mean" validation errors.
+- `title` is the enriched payee/merchant display name the Crew app shows (e.g. "Costco"); `merchantName` and `description` are typically **null** on card transactions. `imageUrl` is an enriched merchant logo (served from spadeapi.com).
+- `mcc` is the card-network merchant category code (string); `externalId` looks like `ttx_...`.
+- `subaccountRunningTotal` / `accountRunningTotal` are the pocket/account balances (cents) after the transaction.
+- Fields confirmed to exist but not yet mapped by the SDK (query via `Execute`): `account`, `transfer`, `checkDeposit`, `originalCheckDepositTransaction`, `fundingEvent`, `seasoning`, `disputeReasons`, `enrichmentId`, `relatedTransactions`, `splitTransactions`, `permittedActions`.
+- Confirmed NOT to exist: `payee`, `counterparty`, `category`, `location`, `createdAt`, `date`, `pending`, `direction`, `statementDescriptor`.
 
 ## Known unknowns
 

@@ -128,12 +128,18 @@ func newTestServer(t *testing.T, opts ...Option) (*Client, *fakeServer) {
 
 		f.mu.Lock()
 		status := f.gqlStatus
-		var response string
 		vars, _ := json.Marshal(req.Variables)
-		haystack := req.Query + "\n" + string(vars)
-		for key, body := range f.gqlResponses {
-			if strings.Contains(haystack, key) {
-				response = body
+		// A key matching the variables (e.g. a cursor like `"after":"c1"`)
+		// beats one matching only the query text; longest match wins within
+		// each tier, keeping selection deterministic.
+		var response, matched string
+		for _, haystack := range []string{string(vars), req.Query} {
+			for key, body := range f.gqlResponses {
+				if strings.Contains(haystack, key) && len(key) > len(matched) {
+					matched, response = key, body
+				}
+			}
+			if response != "" {
 				break
 			}
 		}

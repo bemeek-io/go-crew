@@ -140,20 +140,48 @@ type Subaccount struct {
 
 // CashTransaction is a money movement on a Crew account.
 type CashTransaction struct {
-	ID            string     `json:"id"`
-	AmountCents   int64      `json:"amount"`
-	Description   string     `json:"description"`
-	Status        string     `json:"status"`
-	Type          string     `json:"type"`
-	MerchantName  string     `json:"merchantName"`
-	MerchantCity  string     `json:"merchantCity"`
-	MerchantState string     `json:"merchantState"`
-	OccurredAt    time.Time  `json:"occurredAt"`
-	ClearedAt     *time.Time `json:"clearedAt"`
+	ID          string `json:"id"`
+	AmountCents int64  `json:"amount"`
+	// Title is the enriched payee/merchant display name (e.g. "Costco") —
+	// the name the Crew app shows. MerchantName and Description are often
+	// null on card transactions; prefer Title for display.
+	Title            string     `json:"title"`
+	Description      string     `json:"description"`
+	Status           string     `json:"status"`
+	Type             string     `json:"type"`
+	MCC              string     `json:"mcc"`
+	MerchantName     string     `json:"merchantName"`
+	MerchantAddress1 string     `json:"merchantAddress1"`
+	MerchantCity     string     `json:"merchantCity"`
+	MerchantState    string     `json:"merchantState"`
+	MerchantZip      string     `json:"merchantZip"`
+	MerchantCountry  string     `json:"merchantCountry"`
+	ImageURL         string     `json:"imageUrl"`
+	Note             string     `json:"note"`
+	Memo             string     `json:"memo"`
+	ExternalID       string     `json:"externalId"`
+	OccurredAt       time.Time  `json:"occurredAt"`
+	ClearedAt        *time.Time `json:"clearedAt"`
+	// Running balances (in cents) after this transaction settled.
+	SubaccountRunningTotalCents int64 `json:"subaccountRunningTotal"`
+	AccountRunningTotalCents    int64 `json:"accountRunningTotal"`
 	// Subaccount and DebitCard carry only the fields the SDK queries
 	// (id and name); they are nil when the transaction has none.
 	Subaccount *Subaccount `json:"subaccount"`
 	DebitCard  *DebitCard  `json:"debitCard"`
+}
+
+// Payee returns the best available display name for the transaction:
+// Title, then MerchantName, then Description.
+func (t CashTransaction) Payee() string {
+	switch {
+	case t.Title != "":
+		return t.Title
+	case t.MerchantName != "":
+		return t.MerchantName
+	default:
+		return t.Description
+	}
 }
 
 // Transfer is a movement of funds between accounts or subaccounts.

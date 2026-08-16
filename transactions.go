@@ -5,7 +5,7 @@ import (
 	"iter"
 )
 
-const cashTransactionFields = `id amount description status type merchantName merchantCity merchantState occurredAt clearedAt subaccount { id name } debitCard { id }`
+const cashTransactionFields = `id amount title description status type mcc merchantName merchantAddress1 merchantCity merchantState merchantZip merchantCountry imageUrl note memo externalId occurredAt clearedAt subaccountRunningTotal accountRunningTotal subaccount { id name } debitCard { id }`
 
 const queryCashTransactions = `query CashTransactions($first: Int, $last: Int, $after: String, $before: String, $filter: CashTransactionFilter) {
   currentUser {
