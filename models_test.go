@@ -1,0 +1,106 @@
+package crew
+
+import (
+	"encoding/json"
+	"testing"
+	"time"
+)
+
+func TestDateUnmarshal(t *testing.T) {
+	var d Date
+	if err := json.Unmarshal([]byte(`"2026-08-16"`), &d); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	want := time.Date(2026, 8, 16, 0, 0, 0, 0, time.UTC)
+	if !d.Equal(want) {
+		t.Errorf("date = %v, want %v", d.Time, want)
+	}
+}
+
+func TestDateUnmarshalNull(t *testing.T) {
+	var d Date
+	if err := json.Unmarshal([]byte(`null`), &d); err != nil {
+		t.Fatalf("Unmarshal null: %v", err)
+	}
+	if !d.IsZero() {
+		t.Errorf("date = %v, want zero", d.Time)
+	}
+}
+
+func TestDateUnmarshalInvalid(t *testing.T) {
+	var d Date
+	if err := json.Unmarshal([]byte(`"not-a-date"`), &d); err == nil {
+		t.Fatal("Unmarshal invalid date: want error, got nil")
+	}
+}
+
+func TestDateMarshal(t *testing.T) {
+	d := Date{time.Date(2026, 8, 16, 0, 0, 0, 0, time.UTC)}
+	b, err := json.Marshal(d)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(b) != `"2026-08-16"` {
+		t.Errorf("marshaled = %s, want \"2026-08-16\"", b)
+	}
+}
+
+func TestEnumStrings(t *testing.T) {
+	if got := TransferStatusCompleted.String(); got != "COMPLETED" {
+		t.Errorf("TransferStatusCompleted = %q", got)
+	}
+	if got := SubaccountTypeBillReserve.String(); got != "BILL_RESERVE" {
+		t.Errorf("SubaccountTypeBillReserve = %q", got)
+	}
+	if got := AccountTypeSpend.String(); got != "SPEND" {
+		t.Errorf("AccountTypeSpend = %q", got)
+	}
+	if got := TransferTypeACH.String(); got != "ACH" {
+		t.Errorf("TransferTypeACH = %q", got)
+	}
+}
+
+func TestUnknownEnumValuePassesThrough(t *testing.T) {
+	var tr Transfer
+	if err := json.Unmarshal([]byte(`{"status":"SOME_NEW_STATUS"}`), &tr); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if tr.Status.String() != "SOME_NEW_STATUS" {
+		t.Errorf("status = %q, want SOME_NEW_STATUS", tr.Status)
+	}
+}
+
+func TestCashTransactionUnmarshal(t *testing.T) {
+	raw := `{
+		"id": "tx-1",
+		"amount": -1250,
+		"description": "Coffee",
+		"status": "CLEARED",
+		"type": "PURCHASE",
+		"merchantName": "Cafe",
+		"subaccountId": "sub-1",
+		"debitCardId": "card-1",
+		"date": "2026-08-16",
+		"createdAt": "2026-08-16T12:30:00Z"
+	}`
+	var tx CashTransaction
+	if err := json.Unmarshal([]byte(raw), &tx); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if tx.ID != "tx-1" || tx.AmountCents != -1250 || tx.Status != "CLEARED" {
+		t.Errorf("tx = %+v", tx)
+	}
+	if tx.CreatedAt.Hour() != 12 || tx.Date.Day() != 16 {
+		t.Errorf("timestamps = %v / %v", tx.CreatedAt, tx.Date)
+	}
+}
+
+func TestCashTransactionFilterOmitsEmpty(t *testing.T) {
+	b, err := json.Marshal(CashTransactionFilter{SubaccountID: "sub-1"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(b) != `{"subaccountId":"sub-1"}` {
+		t.Errorf("marshaled = %s, want only subaccountId", b)
+	}
+}

@@ -1,0 +1,10 @@
+version: "2"
+
+linters:
+  # errcheck, govet, ineffassign, staticcheck, and unused are enabled by
+  # default.
+  enable:
+    - misspell
+    - revive
+    - unconvert
+    - unparam
