@@ -235,6 +235,10 @@ type Account struct {
 	Name         string       `json:"name"`
 	BalanceCents int64        `json:"overallBalance"`
 	Subaccounts  []Subaccount `json:"subaccounts"`
+	// PrimarySubaccount is the pocket the account's physical cards spend
+	// from, carrying only ID and Name. Change it with SetSpendSubaccount.
+	// Virtual cards are pinned per-card instead — see DebitCard.Subaccount.
+	PrimarySubaccount *Subaccount `json:"primarySubaccount"`
 }
 
 // Subaccount is a "pocket" within an account.
@@ -331,6 +335,27 @@ type DebitCard struct {
 	MonthlyLimitCents *int64 `json:"monthlyLimit"`
 	// MonthlySpendToDateCents is spend so far in the current calendar month.
 	MonthlySpendToDateCents int64 `json:"monthlySpendToDate"`
+	// Subaccount is the pocket this card is pinned to, carrying only ID and
+	// Name. It is always nil for physical cards, which spend from their
+	// account's PrimarySubaccount instead — use SpendSubaccount to resolve
+	// either kind.
+	Subaccount *Subaccount `json:"subaccount"`
+	// Account is the card's owning account, carrying only ID.
+	Account *Account `json:"account"`
+}
+
+// SpendSubaccount returns the pocket the card spends from: its own pinned
+// Subaccount for virtual cards, or the given account's PrimarySubaccount
+// for physical ones. It returns nil if that pocket wasn't queried — pass
+// the Account this card belongs to, which DebitCards does not fetch.
+func (c DebitCard) SpendSubaccount(account *Account) *Subaccount {
+	if c.Subaccount != nil {
+		return c.Subaccount
+	}
+	if account == nil {
+		return nil
+	}
+	return account.PrimarySubaccount
 }
 
 // IsFrozen reports whether the card is fully frozen. Cards mid-transition

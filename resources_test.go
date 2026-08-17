@@ -15,7 +15,8 @@ const fakeUserJSON = `{
 		"subaccounts": [
 			{"id": "sub-1", "name": "Groceries", "subaccountType": "SPENDING", "overallBalance": 25000, "goal": null},
 			{"id": "sub-2", "name": "Rent", "subaccountType": "BILL", "overallBalance": 150000, "goal": 200000}
-		]
+		],
+		"primarySubaccount": {"id": "sub-1", "name": "Groceries"}
 	}]
 }`
 
@@ -36,6 +37,51 @@ func TestCurrentUser(t *testing.T) {
 	sub := u.Accounts[0].Subaccounts[1]
 	if sub.GoalCents == nil || *sub.GoalCents != 200000 {
 		t.Errorf("sub-2 goal = %v, want 200000", sub.GoalCents)
+	}
+	primary := u.Accounts[0].PrimarySubaccount
+	if primary == nil || primary.ID != "sub-1" || primary.Name != "Groceries" {
+		t.Errorf("primarySubaccount = %+v", primary)
+	}
+	// The deployed schema rejects these on User, so the query must not ask.
+	req := f.lastRequest()
+	if strings.Contains(req.Query, "selectedSpendSubaccount") {
+		t.Errorf("query requests selectedSpendSubaccount: %s", req.Query)
+	}
+}
+
+func TestSetSpendSubaccount(t *testing.T) {
+	c, f := newTestServer(t)
+	f.setGQL("setSpendSubaccount", `{"data":{"setSpendSubaccount":{"result":`+fakeUserJSON+`}}}`)
+
+	u, err := c.SetSpendSubaccount(context.Background(), "user-1", "sub-2")
+	if err != nil {
+		t.Fatalf("SetSpendSubaccount: %v", err)
+	}
+	if u.ID != "user-1" {
+		t.Errorf("user = %+v", u)
+	}
+	input := f.lastRequest().Variables["input"].(map[string]any)
+	if input["userId"] != "user-1" || input["selectedSpendSubaccountId"] != "sub-2" {
+		t.Errorf("input = %v", input)
+	}
+}
+
+func TestSetSpendSubaccountClearsWithExplicitNull(t *testing.T) {
+	c, f := newTestServer(t)
+	f.setGQL("setSpendSubaccount", `{"data":{"setSpendSubaccount":{"result":`+fakeUserJSON+`}}}`)
+
+	if _, err := c.SetSpendSubaccount(context.Background(), "user-1", ""); err != nil {
+		t.Fatalf("SetSpendSubaccount: %v", err)
+	}
+	// Clearing must send null, not omit the key: an absent field leaves the
+	// existing selection in place.
+	input := f.lastRequest().Variables["input"].(map[string]any)
+	v, ok := input["selectedSpendSubaccountId"]
+	if !ok {
+		t.Fatalf("selectedSpendSubaccountId was omitted: %v", input)
+	}
+	if v != nil {
+		t.Errorf("selectedSpendSubaccountId = %v, want nil", v)
 	}
 }
 
@@ -402,7 +448,7 @@ func TestUpdateTransfer(t *testing.T) {
 
 func TestDebitCards(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("debitCards", `{"data":{"currentUser":{"debitCards":[{"id":"card-1","lastFour":"1234","name":"Everyday","status":"ACTIVATED","formFactor":"PHYSICAL","frozenStatus":"UNFROZEN"}]}}}`)
+	f.setGQL("debitCards", `{"data":{"currentUser":{"debitCards":[{"id":"card-1","lastFour":"1234","name":"Everyday","status":"ACTIVATED","formFactor":"PHYSICAL","frozenStatus":"UNFROZEN","subaccount":null,"account":{"id":"acct-1"}}]}}}`)
 
 	cards, err := c.DebitCards(context.Background())
 	if err != nil {
@@ -414,11 +460,26 @@ func TestDebitCards(t *testing.T) {
 	if cards[0].IsFrozen() || cards[0].IsVirtual() {
 		t.Errorf("card = %+v, want unfrozen physical", cards[0])
 	}
+	if cards[0].Account == nil || cards[0].Account.ID != "acct-1" {
+		t.Errorf("account = %+v", cards[0].Account)
+	}
+	// Physical cards carry no pinned pocket; they spend from the account's
+	// primary subaccount.
+	if cards[0].Subaccount != nil {
+		t.Errorf("subaccount = %+v, want nil on a physical card", cards[0].Subaccount)
+	}
+	account := &Account{ID: "acct-1", PrimarySubaccount: &Subaccount{ID: "sub-1", Name: "Groceries"}}
+	if got := cards[0].SpendSubaccount(account); got == nil || got.ID != "sub-1" {
+		t.Errorf("SpendSubaccount = %+v, want sub-1", got)
+	}
+	if got := cards[0].SpendSubaccount(nil); got != nil {
+		t.Errorf("SpendSubaccount(nil) = %+v, want nil", got)
+	}
 }
 
 func TestVirtualDebitCards(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("virtualDebitCards", `{"data":{"currentUser":{"virtualDebitCards":[{"id":"vcard-1","lastFour":"9876","name":"Streaming","status":"ACTIVATED","formFactor":"VIRTUAL","monthlyLimit":5000}]}}}`)
+	f.setGQL("virtualDebitCards", `{"data":{"currentUser":{"virtualDebitCards":[{"id":"vcard-1","lastFour":"9876","name":"Streaming","status":"ACTIVATED","formFactor":"VIRTUAL","monthlyLimit":5000,"subaccount":{"id":"sub-3","name":"Fun Money"},"account":{"id":"acct-1"}}]}}}`)
 
 	cards, err := c.VirtualDebitCards(context.Background())
 	if err != nil {
@@ -429,6 +490,14 @@ func TestVirtualDebitCards(t *testing.T) {
 	}
 	if cards[0].MonthlyLimitCents == nil || *cards[0].MonthlyLimitCents != 5000 {
 		t.Errorf("monthlyLimit = %v", cards[0].MonthlyLimitCents)
+	}
+	if cards[0].Subaccount == nil || cards[0].Subaccount.Name != "Fun Money" {
+		t.Errorf("subaccount = %+v", cards[0].Subaccount)
+	}
+	// A virtual card's own pinned pocket wins over the account's primary.
+	account := &Account{ID: "acct-1", PrimarySubaccount: &Subaccount{ID: "sub-1"}}
+	if got := cards[0].SpendSubaccount(account); got == nil || got.ID != "sub-3" {
+		t.Errorf("SpendSubaccount = %+v, want sub-3", got)
 	}
 }
 
