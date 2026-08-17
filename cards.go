@@ -5,7 +5,9 @@ import (
 	"time"
 )
 
-const debitCardFields = `id name lastFour status formFactor frozenStatus frozenReason color monthlyLimit monthlySpendToDate`
+// subaccount is the pocket a virtual card is pinned to; it is null on
+// physical cards, which spend from their account's primarySubaccount.
+const debitCardFields = `id name lastFour status formFactor frozenStatus frozenReason color monthlyLimit monthlySpendToDate subaccount { id name } account { id }`
 
 const queryDebitCards = `query DebitCards {
   currentUser {

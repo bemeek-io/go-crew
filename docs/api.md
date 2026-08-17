@@ -81,13 +81,13 @@ query Transfers($first: Int, $last: Int, $after: String, $before: String) {
 }
 ```
 
-Account/subaccount fields used: `id type name overallBalance subaccounts { id name subaccountType overallBalance goal }`.
+Account/subaccount fields used: `id type name overallBalance subaccounts { id name subaccountType overallBalance goal } primarySubaccount { id name }`.
 
-Debit card fields used (`...card` above): `id name lastFour status formFactor frozenStatus frozenReason color monthlyLimit monthlySpendToDate`.
+Debit card fields used (`...card` above): `id name lastFour status formFactor frozenStatus frozenReason color monthlyLimit monthlySpendToDate subaccount { id name } account { id }`.
 
 Mutations (each `(input: $input)`, returning `{ result { ...fields } }`):
 
-- Subaccounts: `createSubaccount`, `updateSubaccount`, `deleteSubaccount`, `setTargetBalance`, `removeTargetBalance`
+- Subaccounts: `createSubaccount`, `updateSubaccount`, `deleteSubaccount`, `setTargetBalance`, `removeTargetBalance`, `setSpendSubaccount`
 - Transactions: `updateCashTransaction` (`cashTransactionId`, `note` — those are the **only** two input fields; merchant details, amount, and status are not editable), `reassignCashTransaction` (`cashTransactionId`, `subaccountId`), `splitCashTransaction` (`cashTransactionId`, `splits`)
 - Transfers: `initiateTransfer` (`accountFromId`, `accountToId`, `amount` in cents, `memo`, `note`), `cancelTransfer`, `updateTransfer`
 - Cards: `freezeDebitCard`, `unfreezeDebitCard`, `cancelDebitCard`, `activateDebitCards`, `createVirtualDebitCard`, `updateVirtualDebitCard`
@@ -105,6 +105,7 @@ GraphQL validation rejects an input object containing any field the schema does 
 | `UpdateSubaccountInput` | `subaccountId: ID!`, `name`, `type`, `note`, `goal`, `targetAmount`, `piggyBanked` | This is how a savings goal is set. |
 | `SetTargetBalanceInput` | `accountId: ID!`, `targetBalance: Int!`, `buffer`, `direction` | Keyed on an **account**, not a subaccount, and returns a `TargetBalanceSetting`, not a `Subaccount`. Unrelated to pocket goals. |
 | `RemoveTargetBalanceInput` | `accountId: ID!` | Same — account, not subaccount. |
+| `SetSpendSubaccountInput` | `userId: ID!`, `selectedSpendSubaccountId: ID` | Chooses the pocket physical card swipes spend from. Blank/null means the default subaccount, so send an explicit `null` to clear rather than omitting the key. Payload is `{result: User!}`, not a Subaccount. |
 | `InitiateTransferInput` | `accountFromId: ID!`, `accountToId: ID!`, `amount: Int!`, `memo`, `note`, `type` | IDs may be an account **or** a subaccount. |
 | `UpdateTransferInput` | `transferId: ID!`, `memo`, `note` | — |
 | `CancelTransferInput` | `transferId: ID!` | — |
@@ -123,6 +124,8 @@ Enum values: `CardFrozenReason` = FRAUD_DETECTED, FROZEN_BY_BANK, LOST_OR_STOLEN
 - **`Subaccount.type` is an `AccountType`** — the parent account's kind. The pocket's own kind is `subaccountType: SubaccountType!`.
 - **`currentUser.transfers` takes no `searchFilters` argument**, only `first`/`last`/`after`/`before`. `TransferFilter` applies to the account-level `transfersFrom`/`transfersTo` connections. By contrast `currentUser.cashTransactions` *does* accept `searchFilters`.
 - **`CashTransactionFilter.debitCardId` is `[ID!]`**, a list despite the singular name.
+- **A card's spending pocket lives in two different places.** `DebitCard.subaccount` is the pocket a *virtual* card is pinned to and is always null on physical cards; physical cards spend from `Account.primarySubaccount`, which is changed with `setSpendSubaccount` (not `updateVirtualDebitCard`, which only affects per-merchant virtual cards).
+- **`User.selectedSpendSubaccount` and `User.selectedSpendSubaccountIsExpired` are documented but not deployed.** The live endpoint rejects both on `User` as of 2026-08-17; read the selection from `Account.primarySubaccount` instead. Introspection is disabled server-side (`forbidden`), so this was established by probing field names against the live endpoint.
 
 Enums (observed/documented values): `SubaccountType` = BILL, BILL_RESERVE, CREDIT, CREDIT_RESERVE, SAVINGS, SPENDING; `TransferStatus` = CANCELED, CANCELING, COMPLETED, DECISION_ACCEPTED, DECISION_MANUAL_REVIEW, DECISION_PENDING, DECISION_REJECTED, DECISION_RETRYING; `TransferType` = ACH, ADJUSTMENT, ALLOWANCE, BILL_SUBACCOUNT, BONUS, BOOK, CASH_DEPOSIT, CHECK, …
 

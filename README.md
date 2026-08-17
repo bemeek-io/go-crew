@@ -153,6 +153,7 @@ Handlers run synchronously on the watch goroutine — spawn your own goroutine f
 | `DeleteSubaccount(ctx, id)` | Delete a pocket. |
 | `SetTargetBalance(ctx, in)` | Set an **account's** target balance. |
 | `RemoveTargetBalance(ctx, accountID)` | Clear an account's target balance. |
+| `SetSpendSubaccount(ctx, userID, subID)` | Choose the pocket physical card swipes spend from. |
 
 A pocket's savings goal and an account's target balance are different features. The goal is `Subaccount.GoalCents`, set with `UpdateSubaccount`; the target balance is an account-level rule that sweeps money to or from an overflow account, and returns a `TargetBalanceSetting`.
 
@@ -193,6 +194,34 @@ Transfers are not filterable at the user level — Crew's `currentUser.transfers
 | `CreateVirtualDebitCard(ctx, in)` / `UpdateVirtualDebitCard(ctx, in)` | Create / edit a virtual card. |
 
 All of these return `DebitCard` — Crew has no separate virtual card type, so virtual cards are `DebitCard`s whose `FormFactor` is `VIRTUAL` or `SINGLE_USE` (`IsVirtual()`). Freezing is a state machine rather than a boolean: `FrozenStatus` may be `FREEZING`/`UNFREEZING` mid-transition, and `IsFrozen()` reports only the settled `FROZEN` state. `FreezeDebitCard` requires a `CardFrozenReason` — pass `CardFrozenReasonUserRequested` for an ordinary user-initiated freeze.
+
+### Which pocket does a card spend from?
+
+The two card kinds answer this differently:
+
+- **Virtual cards** are pinned individually: `DebitCard.Subaccount`, set with `UpdateVirtualDebitCard`.
+- **Physical cards** share one selection per account: `Account.PrimarySubaccount`, set with `SetSpendSubaccount`. `DebitCard.Subaccount` is always nil on them, and `UpdateVirtualDebitCard` will not repoint them — it only applies to per-merchant virtual cards.
+
+`card.SpendSubaccount(account)` resolves either kind, preferring the card's own pinned pocket and falling back to the account's primary. `DebitCards` doesn't fetch the owning account (`DebitCard.Account` carries only `ID`), so pair it with `Accounts` to look one up:
+
+```go
+cards, _ := client.DebitCards(ctx)
+accounts, _ := client.Accounts(ctx)
+
+byID := make(map[string]*crew.Account, len(accounts))
+for i := range accounts {
+	byID[accounts[i].ID] = &accounts[i]
+}
+for _, card := range cards {
+	var owner *crew.Account
+	if card.Account != nil {
+		owner = byID[card.Account.ID]
+	}
+	if pocket := card.SpendSubaccount(owner); pocket != nil {
+		fmt.Printf("%s spends from %s\n", card.Name, pocket.Name)
+	}
+}
+```
 
 ### Watching
 

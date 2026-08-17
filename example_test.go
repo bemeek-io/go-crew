@@ -82,6 +82,60 @@ func Example_transactions() {
 	}
 }
 
+// Example_cardPockets prints the pocket each card spends from. Virtual
+// cards are pinned individually; physical ones follow their account's
+// primary subaccount, so the owning account has to be looked up.
+func Example_cardPockets() {
+	client := crew.NewClient(crew.WithToken(os.Getenv("CREW_TOKEN")))
+	ctx := context.Background()
+
+	cards, err := client.DebitCards(ctx)
+	if err != nil {
+		panic(err)
+	}
+	accounts, err := client.Accounts(ctx)
+	if err != nil {
+		panic(err)
+	}
+
+	byID := make(map[string]*crew.Account, len(accounts))
+	for i := range accounts {
+		byID[accounts[i].ID] = &accounts[i]
+	}
+	for _, card := range cards {
+		var owner *crew.Account
+		if card.Account != nil {
+			owner = byID[card.Account.ID]
+		}
+		if pocket := card.SpendSubaccount(owner); pocket != nil {
+			fmt.Printf("%s spends from %s\n", card.Name, pocket.Name)
+		}
+	}
+}
+
+// Example_setSpendSubaccount repoints physical card swipes at another
+// pocket. UpdateVirtualDebitCard cannot do this — it only affects
+// per-merchant virtual cards.
+func Example_setSpendSubaccount() {
+	client := crew.NewClient(crew.WithToken(os.Getenv("CREW_TOKEN")))
+	ctx := context.Background()
+
+	user, err := client.CurrentUser(ctx)
+	if err != nil {
+		panic(err)
+	}
+	updated, err := client.SetSpendSubaccount(ctx, user.ID, "sub-groceries")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(updated.Accounts[0].PrimarySubaccount.Name)
+
+	// Passing an empty ID falls back to the account's default pocket.
+	if _, err := client.SetSpendSubaccount(ctx, user.ID, ""); err != nil {
+		panic(err)
+	}
+}
+
 // Example_watcher polls for transactions and reacts as they appear or clear.
 func Example_watcher() {
 	client := crew.NewClient(
