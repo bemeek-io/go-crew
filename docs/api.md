@@ -55,7 +55,7 @@ Known filters:
 Queries (all rooted at `currentUser`):
 
 ```graphql
-query CurrentUser { currentUser { id firstName lastName email phone accounts { ...account } } }
+query CurrentUser { currentUser { id firstName lastName email phone accounts { ...account } userSpendConfig { id selectedSpendSubaccount { id name } } } }
 query Accounts { currentUser { accounts { ...account } } }
 query SpendAccount { currentUser { spendAccount { ...account } } }
 query SaveAccount { currentUser { saveAccount { ...account } } }
@@ -106,7 +106,7 @@ GraphQL validation rejects an input object containing any field the schema does 
 | `UpdateSubaccountInput` | `subaccountId: ID!`, `name`, `type`, `note`, `goal`, `targetAmount`, `piggyBanked` | This is how a savings goal is set. |
 | `SetTargetBalanceInput` | `accountId: ID!`, `targetBalance: Int!`, `buffer`, `direction` | Keyed on an **account**, not a subaccount, and returns a `TargetBalanceSetting`, not a `Subaccount`. Unrelated to pocket goals. |
 | `RemoveTargetBalanceInput` | `accountId: ID!` | Same — account, not subaccount. |
-| `SetSpendSubaccountInput` | `userId: ID!`, `selectedSpendSubaccountId: ID` | Chooses the pocket physical card swipes spend from. Blank/null means the default subaccount, so send an explicit `null` to clear rather than omitting the key. Payload is `{result: User!}`, not a Subaccount. |
+| `SetSpendSubaccountInput` | `userId: ID!`, `selectedSpendSubaccountId: ID` | Chooses the pocket physical card swipes spend from. Blank/null means the default subaccount, so send an explicit `null` to clear rather than omitting the key. Payload is `{result: User!}`, not a Subaccount — read the new value back at `result { userSpendConfig { selectedSpendSubaccount } }`. |
 | `InitiateTransferInput` | `accountFromId: ID!`, `accountToId: ID!`, `amount: Int!`, `memo`, `note`, `type` | IDs may be an account **or** a subaccount. |
 | `UpdateTransferInput` | `transferId: ID!`, `memo`, `note` | — |
 | `CancelTransferInput` | `transferId: ID!` | — |
@@ -125,9 +125,14 @@ Enum values: `CardFrozenReason` = FRAUD_DETECTED, FROZEN_BY_BANK, LOST_OR_STOLEN
 - **`Subaccount.type` is an `AccountType`** — the parent account's kind. The pocket's own kind is `subaccountType: SubaccountType!`.
 - **`currentUser.transfers` takes no `searchFilters` argument**, only `first`/`last`/`after`/`before`. `TransferFilter` applies to the account-level `transfersFrom`/`transfersTo` connections. By contrast `currentUser.cashTransactions` *does* accept `searchFilters`.
 - **`CashTransactionFilter.debitCardId` is `[ID!]`**, a list despite the singular name.
-- **A card's spending pocket lives in two different places.** `DebitCard.subaccount` is the pocket a *virtual* card is pinned to and is always null on physical cards; physical cards spend from `Account.primarySubaccount`, which is changed with `setSpendSubaccount` (not `updateVirtualDebitCard`, which only affects per-merchant virtual cards).
 - **`Account.family` is `Family!`** and is the same object for every account in one household, which makes its ID a household identifier. `Family` exposes no `name` — only `id` is worth carrying. `User.family` also exists but is nullable (`Family`), so the account route is the reliable one.
-- **`User.selectedSpendSubaccount` and `User.selectedSpendSubaccountIsExpired` are documented but not deployed.** The live endpoint rejects both on `User` as of 2026-08-17; read the selection from `Account.primarySubaccount` instead. Introspection is disabled server-side (`forbidden`), so this was established by probing field names against the live endpoint.
+- **A card's spending pocket lives in three different places**, consulted in this order:
+  1. `DebitCard.subaccount` — a *virtual* card's own pin; always null on physical cards.
+  2. `User.userSpendConfig.selectedSpendSubaccount` — the member's explicit choice, and what physical card swipes follow.
+  3. `Account.primarySubaccount` — the account default, used only when (2) is null.
+
+  `setSpendSubaccount` writes (2) and leaves (3) untouched, so reading `primarySubaccount` alone reports a stale pocket for any member who has made a choice. `updateVirtualDebitCard` writes (1) only and cannot repoint a physical card.
+- **`selectedSpendSubaccount` hangs off `userSpendConfig`, not off `User`.** Requesting `selectedSpendSubaccount` or `selectedSpendSubaccountIsExpired` directly on `User` is rejected by the live endpoint (2026-08-17) — the working selection is `currentUser { userSpendConfig { id selectedSpendSubaccount { id name } } }`. Introspection is disabled server-side (`forbidden`), so this was established by probing field names against the live endpoint. `UserSpendConfig` also exposes `allowOverspending`, `postSpendPocketAssignment`, and `selectedSpendSubaccountIsExpired`, none of which this SDK requests.
 
 Enums (observed/documented values): `SubaccountType` = BILL, BILL_RESERVE, CREDIT, CREDIT_RESERVE, SAVINGS, SPENDING; `TransferStatus` = CANCELED, CANCELING, COMPLETED, DECISION_ACCEPTED, DECISION_MANUAL_REVIEW, DECISION_PENDING, DECISION_REJECTED, DECISION_RETRYING; `TransferType` = ACH, ADJUSTMENT, ALLOWANCE, BILL_SUBACCOUNT, BONUS, BOOK, CASH_DEPOSIT, CHECK, …
 

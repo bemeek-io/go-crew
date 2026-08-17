@@ -211,27 +211,30 @@ All of these return `DebitCard` — Crew has no separate virtual card type, so v
 
 ### Which pocket does a card spend from?
 
-The two card kinds answer this differently:
+Three things can answer this, and Crew consults them in order:
 
-- **Virtual cards** are pinned individually: `DebitCard.Subaccount`, set with `UpdateVirtualDebitCard`.
-- **Physical cards** share one selection per account: `Account.PrimarySubaccount`, set with `SetSpendSubaccount`. `DebitCard.Subaccount` is always nil on them, and `UpdateVirtualDebitCard` will not repoint them — it only applies to per-merchant virtual cards.
+1. **The card's own pin** — `DebitCard.Subaccount`, set with `UpdateVirtualDebitCard`. Virtual cards only; always nil on physical cards.
+2. **The member's choice** — `User.SelectedSpendSubaccount()`, backed by `User.SpendConfig`, set with `SetSpendSubaccount`. This is what physical card swipes actually follow.
+3. **The account default** — `Account.PrimarySubaccount`, used only when the member hasn't chosen.
 
-`card.SpendSubaccount(account)` resolves either kind, preferring the card's own pinned pocket and falling back to the account's primary. `DebitCards` doesn't fetch the owning account (`DebitCard.Account` carries only `ID`), so pair it with `Accounts` to look one up:
+The distinction between 2 and 3 matters: `SetSpendSubaccount` writes the member's choice and **does not** move `PrimarySubaccount`, so reading the account default alone reports a stale pocket for anyone who has picked one. `UpdateVirtualDebitCard` cannot repoint a physical card at all — it only applies to per-merchant virtual cards.
+
+`card.SpendSubaccount(user, account)` walks all three in order. Neither argument is fetched by `DebitCards` (`DebitCard.Account` carries only `ID`), so pair it with `CurrentUser`:
 
 ```go
 cards, _ := client.DebitCards(ctx)
-accounts, _ := client.Accounts(ctx)
+user, _ := client.CurrentUser(ctx)
 
-byID := make(map[string]*crew.Account, len(accounts))
-for i := range accounts {
-	byID[accounts[i].ID] = &accounts[i]
+byID := make(map[string]*crew.Account, len(user.Accounts))
+for i := range user.Accounts {
+	byID[user.Accounts[i].ID] = &user.Accounts[i]
 }
 for _, card := range cards {
 	var owner *crew.Account
 	if card.Account != nil {
 		owner = byID[card.Account.ID]
 	}
-	if pocket := card.SpendSubaccount(owner); pocket != nil {
+	if pocket := card.SpendSubaccount(user, owner); pocket != nil {
 		fmt.Printf("%s spends from %s\n", card.Name, pocket.Name)
 	}
 }

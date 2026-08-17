@@ -8,11 +8,9 @@ const subaccountFields = `id name subaccountType overallBalance goal`
 
 const accountFields = `id type name overallBalance subaccounts { ` + subaccountFields + ` } primarySubaccount { id name } family { id }`
 
-// Crew's published docs also list selectedSpendSubaccount and
-// selectedSpendSubaccountIsExpired on User, but the deployed schema
-// currently rejects both, so they are deliberately not requested here.
-// Read the selected pocket from Account.PrimarySubaccount instead.
-const userFields = `id firstName lastName email phone accounts { ` + accountFields + ` }`
+// selectedSpendSubaccount hangs off userSpendConfig, not off User — asking
+// for it directly on User is what the deployed schema rejects.
+const userFields = `id firstName lastName email phone accounts { ` + accountFields + ` } userSpendConfig { id selectedSpendSubaccount { id name } }`
 
 const queryCurrentUser = `query CurrentUser {
   currentUser { ` + userFields + ` }
@@ -76,7 +74,8 @@ const mutationSetSpendSubaccount = `mutation SetSpendSubaccount($input: SetSpend
 //
 // This is the only way to repoint a physical card: UpdateVirtualDebitCard's
 // SubaccountID applies to per-merchant virtual cards only. The result is
-// visible as Account.PrimarySubaccount.
+// visible as User.SelectedSpendSubaccount(); it does not change the
+// account default, Account.PrimarySubaccount.
 func (c *Client) SetSpendSubaccount(ctx context.Context, userID, subaccountID string) (*User, error) {
 	var out struct {
 		SetSpendSubaccount struct {
