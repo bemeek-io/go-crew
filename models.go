@@ -226,6 +226,32 @@ type User struct {
 	Email     string    `json:"email"`
 	Phone     string    `json:"phone"`
 	Accounts  []Account `json:"accounts"`
+	// SpendConfig holds the user's card-spending settings, including the
+	// pocket their physical cards currently swipe from.
+	SpendConfig *UserSpendConfig `json:"userSpendConfig"`
+}
+
+// UserSpendConfig is a user's card-spending configuration. It is where
+// Crew records the pocket a member's physical cards swipe from, and what
+// SetSpendSubaccount writes.
+type UserSpendConfig struct {
+	ID string `json:"id"`
+	// SelectedSpendSubaccount is the member's explicit choice of pocket,
+	// carrying only ID and Name. It is nil when they have not chosen one,
+	// in which case the account default (Account.PrimarySubaccount)
+	// applies.
+	SelectedSpendSubaccount *Subaccount `json:"selectedSpendSubaccount"`
+}
+
+// SelectedSpendSubaccount returns the pocket this user's physical cards
+// currently swipe from, or nil if they have not chosen one — in which case
+// the account default applies. See DebitCard.SpendSubaccount, which
+// resolves both cases.
+func (u User) SelectedSpendSubaccount() *Subaccount {
+	if u.SpendConfig == nil {
+		return nil
+	}
+	return u.SpendConfig.SelectedSpendSubaccount
 }
 
 // Account is a Crew account (spend, save, or external).
@@ -235,9 +261,11 @@ type Account struct {
 	Name         string       `json:"name"`
 	BalanceCents int64        `json:"overallBalance"`
 	Subaccounts  []Subaccount `json:"subaccounts"`
-	// PrimarySubaccount is the pocket the account's physical cards spend
-	// from, carrying only ID and Name. Change it with SetSpendSubaccount.
-	// Virtual cards are pinned per-card instead — see DebitCard.Subaccount.
+	// PrimarySubaccount is the account's *default* pocket, carrying only ID
+	// and Name. It is not affected by SetSpendSubaccount: a member's
+	// explicit choice lives in User.SpendConfig and takes precedence, so
+	// this is only what physical cards fall back to. Virtual cards are
+	// pinned per-card instead — see DebitCard.Subaccount.
 	PrimarySubaccount *Subaccount `json:"primarySubaccount"`
 	// Family is the household this account belongs to. Every account in a
 	// Crew household shares one, so it identifies members of the same
@@ -355,13 +383,27 @@ type DebitCard struct {
 	Account *Account `json:"account"`
 }
 
-// SpendSubaccount returns the pocket the card spends from: its own pinned
-// Subaccount for virtual cards, or the given account's PrimarySubaccount
-// for physical ones. It returns nil if that pocket wasn't queried — pass
-// the Account this card belongs to, which DebitCards does not fetch.
-func (c DebitCard) SpendSubaccount(account *Account) *Subaccount {
+// SpendSubaccount returns the pocket the card spends from, checked in the
+// order Crew itself resolves them:
+//
+//  1. the card's own pinned Subaccount, for virtual cards;
+//  2. the cardholder's explicit choice, user.SelectedSpendSubaccount();
+//  3. the account default, account.PrimarySubaccount.
+//
+// Step 2 is what SetSpendSubaccount writes, and skipping it reports the
+// wrong pocket for a physical card whenever the member has chosen one.
+//
+// Either argument may be nil, which just skips that step — but neither is
+// fetched by DebitCards, so pass the User from CurrentUser and the Account
+// this card belongs to for a complete answer.
+func (c DebitCard) SpendSubaccount(user *User, account *Account) *Subaccount {
 	if c.Subaccount != nil {
 		return c.Subaccount
+	}
+	if user != nil {
+		if selected := user.SelectedSpendSubaccount(); selected != nil {
+			return selected
+		}
 	}
 	if account == nil {
 		return nil

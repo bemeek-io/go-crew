@@ -18,7 +18,8 @@ const fakeUserJSON = `{
 		],
 		"primarySubaccount": {"id": "sub-1", "name": "Groceries"},
 		"family": {"id": "fam-1"}
-	}]
+	}],
+	"userSpendConfig": {"id": "usc-1", "selectedSpendSubaccount": {"id": "sub-2", "name": "Rent"}}
 }`
 
 func TestCurrentUser(t *testing.T) {
@@ -46,10 +47,26 @@ func TestCurrentUser(t *testing.T) {
 	if fam := u.Accounts[0].Family; fam == nil || fam.ID != "fam-1" {
 		t.Errorf("family = %+v", fam)
 	}
-	// The deployed schema rejects these on User, so the query must not ask.
+	if selected := u.SelectedSpendSubaccount(); selected == nil || selected.ID != "sub-2" {
+		t.Errorf("SelectedSpendSubaccount = %+v, want sub-2", selected)
+	}
+	// selectedSpendSubaccount must be requested under userSpendConfig; the
+	// deployed schema rejects it directly on User.
 	req := f.lastRequest()
-	if strings.Contains(req.Query, "selectedSpendSubaccount") {
-		t.Errorf("query requests selectedSpendSubaccount: %s", req.Query)
+	if !strings.Contains(req.Query, "userSpendConfig { id selectedSpendSubaccount") {
+		t.Errorf("query does not request selectedSpendSubaccount under userSpendConfig: %s", req.Query)
+	}
+}
+
+func TestSelectedSpendSubaccountWithoutConfig(t *testing.T) {
+	// A user who has never chosen a pocket has no selection, and callers
+	// fall back to the account default.
+	if got := (User{}).SelectedSpendSubaccount(); got != nil {
+		t.Errorf("SelectedSpendSubaccount = %+v, want nil", got)
+	}
+	u := User{SpendConfig: &UserSpendConfig{ID: "usc-1"}}
+	if got := u.SelectedSpendSubaccount(); got != nil {
+		t.Errorf("SelectedSpendSubaccount = %+v, want nil", got)
 	}
 }
 
@@ -508,17 +525,44 @@ func TestDebitCards(t *testing.T) {
 	if cards[0].Account == nil || cards[0].Account.ID != "acct-1" {
 		t.Errorf("account = %+v", cards[0].Account)
 	}
-	// Physical cards carry no pinned pocket; they spend from the account's
-	// primary subaccount.
+	// Physical cards carry no pinned pocket of their own.
 	if cards[0].Subaccount != nil {
 		t.Errorf("subaccount = %+v, want nil on a physical card", cards[0].Subaccount)
 	}
-	account := &Account{ID: "acct-1", PrimarySubaccount: &Subaccount{ID: "sub-1", Name: "Groceries"}}
-	if got := cards[0].SpendSubaccount(account); got == nil || got.ID != "sub-1" {
-		t.Errorf("SpendSubaccount = %+v, want sub-1", got)
+	if got := cards[0].SpendSubaccount(nil, nil); got != nil {
+		t.Errorf("SpendSubaccount(nil, nil) = %+v, want nil", got)
 	}
-	if got := cards[0].SpendSubaccount(nil); got != nil {
-		t.Errorf("SpendSubaccount(nil) = %+v, want nil", got)
+}
+
+func TestSpendSubaccountPrefersTheMembersChoice(t *testing.T) {
+	physical := DebitCard{ID: "card-1", FormFactor: DebitCardFormFactorPhysical}
+	account := &Account{ID: "acct-1", PrimarySubaccount: &Subaccount{ID: "sub-1", Name: "Groceries"}}
+
+	// With no explicit choice, a physical card follows the account default.
+	noChoice := &User{}
+	if got := physical.SpendSubaccount(noChoice, account); got == nil || got.ID != "sub-1" {
+		t.Errorf("SpendSubaccount = %+v, want the account default sub-1", got)
+	}
+
+	// Once the member picks a pocket, that wins — PrimarySubaccount does
+	// not move when SetSpendSubaccount is called, so consulting it alone
+	// reports the stale pocket.
+	chose := &User{SpendConfig: &UserSpendConfig{
+		ID:                      "usc-1",
+		SelectedSpendSubaccount: &Subaccount{ID: "sub-2", Name: "Rent"},
+	}}
+	if got := physical.SpendSubaccount(chose, account); got == nil || got.ID != "sub-2" {
+		t.Errorf("SpendSubaccount = %+v, want the member's choice sub-2", got)
+	}
+
+	// A virtual card's own pin outranks the member-level choice.
+	virtual := DebitCard{
+		ID:         "vcard-1",
+		FormFactor: DebitCardFormFactorVirtual,
+		Subaccount: &Subaccount{ID: "sub-3", Name: "Fun Money"},
+	}
+	if got := virtual.SpendSubaccount(chose, account); got == nil || got.ID != "sub-3" {
+		t.Errorf("SpendSubaccount = %+v, want the card's own pin sub-3", got)
 	}
 }
 
@@ -541,7 +585,7 @@ func TestVirtualDebitCards(t *testing.T) {
 	}
 	// A virtual card's own pinned pocket wins over the account's primary.
 	account := &Account{ID: "acct-1", PrimarySubaccount: &Subaccount{ID: "sub-1"}}
-	if got := cards[0].SpendSubaccount(account); got == nil || got.ID != "sub-3" {
+	if got := cards[0].SpendSubaccount(nil, account); got == nil || got.ID != "sub-3" {
 		t.Errorf("SpendSubaccount = %+v, want sub-3", got)
 	}
 }

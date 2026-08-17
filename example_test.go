@@ -83,8 +83,9 @@ func Example_transactions() {
 }
 
 // Example_cardPockets prints the pocket each card spends from. Virtual
-// cards are pinned individually; physical ones follow their account's
-// primary subaccount, so the owning account has to be looked up.
+// cards are pinned individually; physical ones follow the member's own
+// choice, falling back to the account default — so both the user and the
+// owning account have to be on hand.
 func Example_cardPockets() {
 	client := crew.NewClient(crew.WithToken(os.Getenv("CREW_TOKEN")))
 	ctx := context.Background()
@@ -93,21 +94,21 @@ func Example_cardPockets() {
 	if err != nil {
 		panic(err)
 	}
-	accounts, err := client.Accounts(ctx)
+	user, err := client.CurrentUser(ctx)
 	if err != nil {
 		panic(err)
 	}
 
-	byID := make(map[string]*crew.Account, len(accounts))
-	for i := range accounts {
-		byID[accounts[i].ID] = &accounts[i]
+	byID := make(map[string]*crew.Account, len(user.Accounts))
+	for i := range user.Accounts {
+		byID[user.Accounts[i].ID] = &user.Accounts[i]
 	}
 	for _, card := range cards {
 		var owner *crew.Account
 		if card.Account != nil {
 			owner = byID[card.Account.ID]
 		}
-		if pocket := card.SpendSubaccount(owner); pocket != nil {
+		if pocket := card.SpendSubaccount(user, owner); pocket != nil {
 			fmt.Printf("%s spends from %s\n", card.Name, pocket.Name)
 		}
 	}
@@ -128,7 +129,8 @@ func Example_setSpendSubaccount() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(updated.Accounts[0].PrimarySubaccount.Name)
+	// The choice lands in the spend config, not on the account default.
+	fmt.Println(updated.SelectedSpendSubaccount().Name)
 
 	// Passing an empty ID falls back to the account's default pocket.
 	if _, err := client.SetSpendSubaccount(ctx, user.ID, ""); err != nil {
