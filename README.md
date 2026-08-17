@@ -149,10 +149,12 @@ Handlers run synchronously on the watch goroutine — spawn your own goroutine f
 | `SpendAccount(ctx)` / `SaveAccount(ctx)` | The primary spending / savings account. |
 | `Subaccounts(ctx)` | All pockets across accounts. |
 | `CreateSubaccount(ctx, in)` | Create a pocket. |
-| `UpdateSubaccount(ctx, in)` | Rename a pocket. |
+| `UpdateSubaccount(ctx, in)` | Rename a pocket or set its savings goal. |
 | `DeleteSubaccount(ctx, id)` | Delete a pocket. |
-| `SetTargetBalance(ctx, id, cents)` | Set a pocket's savings goal. |
-| `RemoveTargetBalance(ctx, id)` | Clear a pocket's savings goal. |
+| `SetTargetBalance(ctx, in)` | Set an **account's** target balance. |
+| `RemoveTargetBalance(ctx, accountID)` | Clear an account's target balance. |
+
+A pocket's savings goal and an account's target balance are different features. The goal is `Subaccount.GoalCents`, set with `UpdateSubaccount`; the target balance is an account-level rule that sweeps money to or from an overflow account, and returns a `TargetBalanceSetting`.
 
 ### Transactions
 
@@ -160,31 +162,37 @@ Handlers run synchronously on the watch goroutine — spawn your own goroutine f
 | --- | --- |
 | `CashTransactions(ctx, opts)` | One page of transactions (Relay cursors). |
 | `AllCashTransactions(ctx, filter)` | Iterator over every transaction. |
-| `UpdateCashTransaction(ctx, in)` | Edit a transaction's description. |
+| `UpdateCashTransaction(ctx, in)` | Set a transaction's note. |
 | `ReassignCashTransaction(ctx, txID, subID)` | Move a transaction to another pocket. |
 | `SplitCashTransaction(ctx, in)` | Split a transaction across pockets. |
 
-Each `CashTransaction` carries rich detail: use **`Payee()`** for the display name (the enriched `Title`, e.g. "Costco" — `MerchantName` and `Description` are usually null on card transactions), plus `MCC`, merchant address fields, `ImageURL` (merchant logo), `Note`/`Memo`, `OccurredAt`/`ClearedAt`, running balance totals, and the associated `Subaccount` and `DebitCard`.
+Each `CashTransaction` carries rich detail: use **`Payee()`** for the display name (the enriched `Title`, e.g. "Costco" — `MerchantName` and `Description` are usually null on card transactions), plus `MCC`, merchant address fields, `ImageURL` (merchant logo), `Note`/`Memo`, `OccurredAt`/`ClearedAt`, running balance totals, and the associated `Subaccount` and `DebitCard`. `Description` is deprecated in Crew's schema in favor of `Memo`.
+
+Only the note is user-editable: `UpdateCashTransaction` takes a `CashTransactionID` and a `Note`. Merchant details, amount, and status are set by Crew.
 
 ### Transfers
 
 | Method | Description |
 | --- | --- |
 | `Transfers(ctx, opts)` | One page of transfers. |
-| `AllTransfers(ctx, filter)` | Iterator over every transfer. |
+| `AllTransfers(ctx)` | Iterator over every transfer. |
 | `InitiateTransfer(ctx, in)` | Move money. **Not safely retryable** — see godoc. |
 | `CancelTransfer(ctx, id)` | Cancel a pending transfer. |
 | `UpdateTransfer(ctx, in)` | Edit a transfer's memo. |
+
+Transfers are not filterable at the user level — Crew's `currentUser.transfers` connection accepts pagination arguments only.
 
 ### Debit Cards
 
 | Method | Description |
 | --- | --- |
 | `DebitCards(ctx)` / `VirtualDebitCards(ctx)` | List physical / virtual cards. |
-| `FreezeDebitCard(ctx, id)` / `UnfreezeDebitCard(ctx, id)` | Freeze / unfreeze a card. |
+| `FreezeDebitCard(ctx, id, reason)` / `UnfreezeDebitCard(ctx, id)` | Freeze / unfreeze a card. |
 | `CancelDebitCard(ctx, id)` | Permanently cancel a card. |
-| `ActivateDebitCards(ctx, in)` | Activate new physical cards. |
+| `ActivateDebitCards(ctx, cardIDs)` | Activate new physical cards. |
 | `CreateVirtualDebitCard(ctx, in)` / `UpdateVirtualDebitCard(ctx, in)` | Create / edit a virtual card. |
+
+All of these return `DebitCard` — Crew has no separate virtual card type, so virtual cards are `DebitCard`s whose `FormFactor` is `VIRTUAL` or `SINGLE_USE` (`IsVirtual()`). Freezing is a state machine rather than a boolean: `FrozenStatus` may be `FREEZING`/`UNFREEZING` mid-transition, and `IsFrozen()` reports only the settled `FROZEN` state. `FreezeDebitCard` requires a `CardFrozenReason` — pass `CardFrozenReasonUserRequested` for an ordinary user-initiated freeze.
 
 ### Watching
 

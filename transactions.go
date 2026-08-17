@@ -114,9 +114,13 @@ func (c *Client) AllCashTransactions(ctx context.Context, filter *CashTransactio
 }
 
 // UpdateCashTransactionInput are the parameters for UpdateCashTransaction.
+//
+// Crew's UpdateCashTransactionInput accepts only these two fields; the note
+// is the free-text annotation shown on the transaction. Merchant details,
+// amount, and status are set by Crew and cannot be edited.
 type UpdateCashTransactionInput struct {
 	CashTransactionID string `json:"cashTransactionId"`
-	Description       string `json:"description,omitempty"`
+	Note              string `json:"note,omitempty"`
 }
 
 const mutationUpdateCashTransaction = `mutation UpdateCashTransaction($input: UpdateCashTransactionInput!) {
@@ -125,7 +129,7 @@ const mutationUpdateCashTransaction = `mutation UpdateCashTransaction($input: Up
   }
 }`
 
-// UpdateCashTransaction updates a transaction's attributes.
+// UpdateCashTransaction sets a transaction's note.
 func (c *Client) UpdateCashTransaction(ctx context.Context, in UpdateCashTransactionInput) (*CashTransaction, error) {
 	var out struct {
 		UpdateCashTransaction struct {

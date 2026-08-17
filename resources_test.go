@@ -13,8 +13,8 @@ const fakeUserJSON = `{
 	"accounts": [{
 		"id": "acct-1", "type": "SPEND", "name": "Spending", "overallBalance": 100000,
 		"subaccounts": [
-			{"id": "sub-1", "name": "Groceries", "type": "SPENDING", "overallBalance": 25000, "goal": null},
-			{"id": "sub-2", "name": "Rent", "type": "BILL", "overallBalance": 150000, "goal": 200000}
+			{"id": "sub-1", "name": "Groceries", "subaccountType": "SPENDING", "overallBalance": 25000, "goal": null},
+			{"id": "sub-2", "name": "Rent", "subaccountType": "BILL", "overallBalance": 150000, "goal": 200000}
 		]
 	}]
 }`
@@ -96,7 +96,7 @@ func TestSubaccountsFlattens(t *testing.T) {
 
 func TestCreateSubaccount(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("createSubaccount", `{"data":{"createSubaccount":{"result":{"id":"sub-3","name":"Vacation","type":"SAVINGS","balance":0}}}}`)
+	f.setGQL("createSubaccount", `{"data":{"createSubaccount":{"result":{"id":"sub-3","name":"Vacation","subaccountType":"SAVINGS","overallBalance":0}}}}`)
 
 	sub, err := c.CreateSubaccount(context.Background(), CreateSubaccountInput{AccountID: "acct-1", Name: "Vacation"})
 	if err != nil {
@@ -113,14 +113,20 @@ func TestCreateSubaccount(t *testing.T) {
 
 func TestUpdateSubaccount(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("updateSubaccount", `{"data":{"updateSubaccount":{"result":{"id":"sub-1","name":"Food","type":"SPENDING","balance":25000}}}}`)
+	f.setGQL("updateSubaccount", `{"data":{"updateSubaccount":{"result":{"id":"sub-1","name":"Food","subaccountType":"SPENDING","overallBalance":25000,"goal":40000}}}}`)
 
-	sub, err := c.UpdateSubaccount(context.Background(), UpdateSubaccountInput{SubaccountID: "sub-1", Name: "Food"})
+	goal := int64(40000)
+	sub, err := c.UpdateSubaccount(context.Background(), UpdateSubaccountInput{SubaccountID: "sub-1", Name: "Food", GoalCents: &goal})
 	if err != nil {
 		t.Fatalf("UpdateSubaccount: %v", err)
 	}
-	if sub.Name != "Food" {
+	if sub.Name != "Food" || sub.GoalCents == nil || *sub.GoalCents != 40000 {
 		t.Errorf("sub = %+v", sub)
+	}
+	// A pocket's savings goal is set here, not via SetTargetBalance.
+	input := f.lastRequest().Variables["input"].(map[string]any)
+	if input["goal"] != float64(40000) {
+		t.Errorf("input = %v", input)
 	}
 }
 
@@ -139,31 +145,42 @@ func TestDeleteSubaccount(t *testing.T) {
 
 func TestSetTargetBalance(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("setTargetBalance", `{"data":{"setTargetBalance":{"result":{"id":"sub-1","goal":50000}}}}`)
+	f.setGQL("setTargetBalance", `{"data":{"setTargetBalance":{"result":{"id":"tbs-1","targetBalance":50000,"buffer":2500,"direction":"BOTH","enabled":true}}}}`)
 
-	sub, err := c.SetTargetBalance(context.Background(), "sub-1", 50000)
+	setting, err := c.SetTargetBalance(context.Background(), SetTargetBalanceInput{
+		AccountID:          "acct-1",
+		TargetBalanceCents: 50000,
+	})
 	if err != nil {
 		t.Fatalf("SetTargetBalance: %v", err)
 	}
-	if sub.GoalCents == nil || *sub.GoalCents != 50000 {
-		t.Errorf("goal = %v", sub.GoalCents)
+	if setting.TargetBalanceCents != 50000 || setting.Direction != TargetBalanceDirectionBoth || !setting.Enabled {
+		t.Errorf("setting = %+v", setting)
 	}
+	// Target balances are set on an account, not a subaccount.
 	input := f.lastRequest().Variables["input"].(map[string]any)
-	if input["targetBalance"] != float64(50000) {
+	if input["accountId"] != "acct-1" || input["targetBalance"] != float64(50000) {
 		t.Errorf("input = %v", input)
+	}
+	if _, ok := input["buffer"]; ok {
+		t.Errorf("unset buffer was sent: %v", input)
 	}
 }
 
 func TestRemoveTargetBalance(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("removeTargetBalance", `{"data":{"removeTargetBalance":{"result":{"id":"sub-1","goal":null}}}}`)
+	f.setGQL("removeTargetBalance", `{"data":{"removeTargetBalance":{"result":{"id":"tbs-1","enabled":false}}}}`)
 
-	sub, err := c.RemoveTargetBalance(context.Background(), "sub-1")
+	setting, err := c.RemoveTargetBalance(context.Background(), "acct-1")
 	if err != nil {
 		t.Fatalf("RemoveTargetBalance: %v", err)
 	}
-	if sub.GoalCents != nil {
-		t.Errorf("goal = %v, want nil", sub.GoalCents)
+	if setting.Enabled {
+		t.Errorf("setting = %+v, want disabled", setting)
+	}
+	input := f.lastRequest().Variables["input"].(map[string]any)
+	if input["accountId"] != "acct-1" {
+		t.Errorf("input = %v", input)
 	}
 }
 
@@ -252,14 +269,25 @@ func TestAllCashTransactionsYieldsError(t *testing.T) {
 
 func TestUpdateCashTransaction(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("updateCashTransaction", `{"data":{"updateCashTransaction":{"result":{"id":"tx-1","description":"Espresso"}}}}`)
+	f.setGQL("updateCashTransaction", `{"data":{"updateCashTransaction":{"result":{"id":"tx-1","note":"Espresso"}}}}`)
 
-	tx, err := c.UpdateCashTransaction(context.Background(), UpdateCashTransactionInput{CashTransactionID: "tx-1", Description: "Espresso"})
+	tx, err := c.UpdateCashTransaction(context.Background(), UpdateCashTransactionInput{CashTransactionID: "tx-1", Note: "Espresso"})
 	if err != nil {
 		t.Fatalf("UpdateCashTransaction: %v", err)
 	}
-	if tx.Description != "Espresso" {
+	if tx.Note != "Espresso" {
 		t.Errorf("tx = %+v", tx)
+	}
+	// Crew's UpdateCashTransactionInput accepts only cashTransactionId and
+	// note; any other key fails GraphQL input validation server-side.
+	input := f.lastRequest().Variables["input"].(map[string]any)
+	if input["cashTransactionId"] != "tx-1" || input["note"] != "Espresso" {
+		t.Errorf("input = %v", input)
+	}
+	for key := range input {
+		if key != "cashTransactionId" && key != "note" {
+			t.Errorf("input contains unsupported field %q: %v", key, input)
+		}
 	}
 }
 
@@ -313,6 +341,15 @@ func TestTransfers(t *testing.T) {
 	if len(page.Transfers) != 1 || page.Transfers[0].Status != TransferStatusCompleted {
 		t.Errorf("page = %+v", page)
 	}
+	// currentUser.transfers accepts no searchFilters argument, so the query
+	// must not declare or pass a filter variable.
+	req := f.lastRequest()
+	if strings.Contains(req.Query, "searchFilters") {
+		t.Errorf("query passes searchFilters to currentUser.transfers: %s", req.Query)
+	}
+	if _, ok := req.Variables["filter"]; ok {
+		t.Errorf("variables = %v, want no filter", req.Variables)
+	}
 }
 
 func TestInitiateTransfer(t *testing.T) {
@@ -365,108 +402,141 @@ func TestUpdateTransfer(t *testing.T) {
 
 func TestDebitCards(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("debitCards", `{"data":{"currentUser":{"debitCards":[{"id":"card-1","last4":"1234","status":"ACTIVE","frozen":false}]}}}`)
+	f.setGQL("debitCards", `{"data":{"currentUser":{"debitCards":[{"id":"card-1","lastFour":"1234","name":"Everyday","status":"ACTIVATED","formFactor":"PHYSICAL","frozenStatus":"UNFROZEN"}]}}}`)
 
 	cards, err := c.DebitCards(context.Background())
 	if err != nil {
 		t.Fatalf("DebitCards: %v", err)
 	}
-	if len(cards) != 1 || cards[0].Last4 != "1234" {
+	if len(cards) != 1 || cards[0].LastFour != "1234" || cards[0].Status != DebitCardStatusActivated {
 		t.Errorf("cards = %+v", cards)
+	}
+	if cards[0].IsFrozen() || cards[0].IsVirtual() {
+		t.Errorf("card = %+v, want unfrozen physical", cards[0])
 	}
 }
 
 func TestVirtualDebitCards(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("virtualDebitCards", `{"data":{"currentUser":{"virtualDebitCards":[{"id":"vcard-1","last4":"9876","status":"ACTIVE","frozen":false,"nickname":"Streaming"}]}}}`)
+	f.setGQL("virtualDebitCards", `{"data":{"currentUser":{"virtualDebitCards":[{"id":"vcard-1","lastFour":"9876","name":"Streaming","status":"ACTIVATED","formFactor":"VIRTUAL","monthlyLimit":5000}]}}}`)
 
 	cards, err := c.VirtualDebitCards(context.Background())
 	if err != nil {
 		t.Fatalf("VirtualDebitCards: %v", err)
 	}
-	if len(cards) != 1 || cards[0].Nickname != "Streaming" {
+	if len(cards) != 1 || cards[0].Name != "Streaming" || !cards[0].IsVirtual() {
 		t.Errorf("cards = %+v", cards)
+	}
+	if cards[0].MonthlyLimitCents == nil || *cards[0].MonthlyLimitCents != 5000 {
+		t.Errorf("monthlyLimit = %v", cards[0].MonthlyLimitCents)
 	}
 }
 
 func TestFreezeDebitCard(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("freezeDebitCard", `{"data":{"freezeDebitCard":{"result":{"id":"card-1","frozen":true}}}}`)
+	f.setGQL("freezeDebitCard", `{"data":{"freezeDebitCard":{"result":{"id":"card-1","frozenStatus":"FROZEN","frozenReason":"LOST_OR_STOLEN"}}}}`)
 
-	card, err := c.FreezeDebitCard(context.Background(), "card-1")
+	card, err := c.FreezeDebitCard(context.Background(), "card-1", CardFrozenReasonLostOrStolen)
 	if err != nil {
 		t.Fatalf("FreezeDebitCard: %v", err)
 	}
-	if !card.Frozen {
+	if !card.IsFrozen() || card.FrozenReason != CardFrozenReasonLostOrStolen {
 		t.Errorf("card = %+v, want frozen", card)
 	}
+	// Crew requires a reason on this input; omitting it fails validation.
 	input := f.lastRequest().Variables["input"].(map[string]any)
-	if input["debitCardId"] != "card-1" {
+	if input["debitCardId"] != "card-1" || input["reason"] != "LOST_OR_STOLEN" {
 		t.Errorf("input = %v", input)
 	}
 }
 
 func TestUnfreezeDebitCard(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("unfreezeDebitCard", `{"data":{"unfreezeDebitCard":{"result":{"id":"card-1","frozen":false}}}}`)
+	f.setGQL("unfreezeDebitCard", `{"data":{"unfreezeDebitCard":{"result":{"id":"card-1","frozenStatus":"UNFROZEN"}}}}`)
 
 	card, err := c.UnfreezeDebitCard(context.Background(), "card-1")
 	if err != nil {
 		t.Fatalf("UnfreezeDebitCard: %v", err)
 	}
-	if card.Frozen {
+	if card.IsFrozen() {
 		t.Errorf("card = %+v, want unfrozen", card)
+	}
+}
+
+func TestFreezingCardIsNotYetFrozen(t *testing.T) {
+	card := DebitCard{FrozenStatus: CardFrozenStatusFreezing}
+	if card.IsFrozen() {
+		t.Error("a FREEZING card reported IsFrozen")
 	}
 }
 
 func TestCancelDebitCard(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("cancelDebitCard", `{"data":{"cancelDebitCard":{"result":{"id":"card-1","status":"CANCELED"}}}}`)
+	f.setGQL("cancelDebitCard", `{"data":{"cancelDebitCard":{"result":{"id":"card-1","status":"DEACTIVATED"}}}}`)
 
 	card, err := c.CancelDebitCard(context.Background(), "card-1")
 	if err != nil {
 		t.Fatalf("CancelDebitCard: %v", err)
 	}
-	if card.Status != "CANCELED" {
+	if card.Status != DebitCardStatusDeactivated {
 		t.Errorf("card = %+v", card)
 	}
 }
 
 func TestActivateDebitCards(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("activateDebitCards", `{"data":{"activateDebitCards":{"result":[{"id":"card-1","status":"ACTIVE"}]}}}`)
+	f.setGQL("activateDebitCards", `{"data":{"activateDebitCards":{"result":[{"id":"card-1","status":"ACTIVATED"}]}}}`)
 
-	cards, err := c.ActivateDebitCards(context.Background(), ActivateDebitCardsInput{DebitCardIDs: []string{"card-1"}, Last4: "1234"})
+	cards, err := c.ActivateDebitCards(context.Background(), []string{"card-1", "card-2"})
 	if err != nil {
 		t.Fatalf("ActivateDebitCards: %v", err)
 	}
-	if len(cards) != 1 || cards[0].Status != "ACTIVE" {
+	if len(cards) != 1 || cards[0].Status != DebitCardStatusActivated {
 		t.Errorf("cards = %+v", cards)
+	}
+	// The schema names this list field debitCardId, singular.
+	input := f.lastRequest().Variables["input"].(map[string]any)
+	ids, ok := input["debitCardId"].([]any)
+	if !ok || len(ids) != 2 || ids[0] != "card-1" {
+		t.Errorf("input = %v", input)
 	}
 }
 
 func TestCreateVirtualDebitCard(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("createVirtualDebitCard", `{"data":{"createVirtualDebitCard":{"result":{"id":"vcard-2","nickname":"Trial subscriptions"}}}}`)
+	f.setGQL("createVirtualDebitCard", `{"data":{"createVirtualDebitCard":{"result":{"id":"vcard-2","name":"Trial subscriptions","formFactor":"VIRTUAL"}}}}`)
 
-	card, err := c.CreateVirtualDebitCard(context.Background(), CreateVirtualDebitCardInput{Nickname: "Trial subscriptions"})
+	limit := int64(2500)
+	card, err := c.CreateVirtualDebitCard(context.Background(), CreateVirtualDebitCardInput{
+		UserID:            "user-1",
+		Name:              "Trial subscriptions",
+		MonthlyLimitCents: &limit,
+	})
 	if err != nil {
 		t.Fatalf("CreateVirtualDebitCard: %v", err)
 	}
-	if card.ID != "vcard-2" {
+	if card.ID != "vcard-2" || card.Name != "Trial subscriptions" {
 		t.Errorf("card = %+v", card)
+	}
+	input := f.lastRequest().Variables["input"].(map[string]any)
+	if input["userId"] != "user-1" || input["name"] != "Trial subscriptions" || input["monthlyLimit"] != float64(2500) {
+		t.Errorf("input = %v", input)
 	}
 }
 
 func TestUpdateVirtualDebitCard(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("updateVirtualDebitCard", `{"data":{"updateVirtualDebitCard":{"result":{"id":"vcard-2","nickname":"Renamed"}}}}`)
+	f.setGQL("updateVirtualDebitCard", `{"data":{"updateVirtualDebitCard":{"result":{"id":"vcard-2","name":"Renamed"}}}}`)
 
-	card, err := c.UpdateVirtualDebitCard(context.Background(), UpdateVirtualDebitCardInput{VirtualDebitCardID: "vcard-2", Nickname: "Renamed"})
+	card, err := c.UpdateVirtualDebitCard(context.Background(), UpdateVirtualDebitCardInput{DebitCardID: "vcard-2", Name: "Renamed"})
 	if err != nil {
 		t.Fatalf("UpdateVirtualDebitCard: %v", err)
 	}
-	if card.Nickname != "Renamed" {
+	if card.Name != "Renamed" {
 		t.Errorf("card = %+v", card)
+	}
+	input := f.lastRequest().Variables["input"].(map[string]any)
+	if input["debitCardId"] != "vcard-2" || input["name"] != "Renamed" {
+		t.Errorf("input = %v", input)
 	}
 }
