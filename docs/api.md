@@ -61,6 +61,7 @@ query SpendAccount { currentUser { spendAccount { ...account } } }
 query SaveAccount { currentUser { saveAccount { ...account } } }
 query DebitCards { currentUser { debitCards { ...card } } }
 query VirtualDebitCards { currentUser { virtualDebitCards { ...card } } }
+query CurrentUserFamilyID { currentUser { accounts { family { id } } } }
 
 query CashTransactions($first: Int, $last: Int, $after: String, $before: String, $filter: CashTransactionFilter) {
   currentUser {
@@ -81,7 +82,7 @@ query Transfers($first: Int, $last: Int, $after: String, $before: String) {
 }
 ```
 
-Account/subaccount fields used: `id type name overallBalance subaccounts { id name subaccountType overallBalance goal } primarySubaccount { id name }`.
+Account/subaccount fields used: `id type name overallBalance subaccounts { id name subaccountType overallBalance goal } primarySubaccount { id name } family { id }`.
 
 Debit card fields used (`...card` above): `id name lastFour status formFactor frozenStatus frozenReason color monthlyLimit monthlySpendToDate subaccount { id name } account { id }`.
 
@@ -125,6 +126,7 @@ Enum values: `CardFrozenReason` = FRAUD_DETECTED, FROZEN_BY_BANK, LOST_OR_STOLEN
 - **`currentUser.transfers` takes no `searchFilters` argument**, only `first`/`last`/`after`/`before`. `TransferFilter` applies to the account-level `transfersFrom`/`transfersTo` connections. By contrast `currentUser.cashTransactions` *does* accept `searchFilters`.
 - **`CashTransactionFilter.debitCardId` is `[ID!]`**, a list despite the singular name.
 - **A card's spending pocket lives in two different places.** `DebitCard.subaccount` is the pocket a *virtual* card is pinned to and is always null on physical cards; physical cards spend from `Account.primarySubaccount`, which is changed with `setSpendSubaccount` (not `updateVirtualDebitCard`, which only affects per-merchant virtual cards).
+- **`Account.family` is `Family!`** and is the same object for every account in one household, which makes its ID a household identifier. `Family` exposes no `name` — only `id` is worth carrying. `User.family` also exists but is nullable (`Family`), so the account route is the reliable one.
 - **`User.selectedSpendSubaccount` and `User.selectedSpendSubaccountIsExpired` are documented but not deployed.** The live endpoint rejects both on `User` as of 2026-08-17; read the selection from `Account.primarySubaccount` instead. Introspection is disabled server-side (`forbidden`), so this was established by probing field names against the live endpoint.
 
 Enums (observed/documented values): `SubaccountType` = BILL, BILL_RESERVE, CREDIT, CREDIT_RESERVE, SAVINGS, SPENDING; `TransferStatus` = CANCELED, CANCELING, COMPLETED, DECISION_ACCEPTED, DECISION_MANUAL_REVIEW, DECISION_PENDING, DECISION_REJECTED, DECISION_RETRYING; `TransferType` = ACH, ADJUSTMENT, ALLOWANCE, BILL_SUBACCOUNT, BONUS, BOOK, CASH_DEPOSIT, CHECK, …

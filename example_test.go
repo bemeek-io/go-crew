@@ -136,6 +136,22 @@ func Example_setSpendSubaccount() {
 	}
 }
 
+// Example_familyLink links household members during login. Every account
+// in a Crew household shares a family ID, so two members who both sign in
+// land on the same value without exchanging anything. The lookup is
+// best-effort: any error just means "no link".
+func Example_familyLink() {
+	client := crew.NewClient(crew.WithToken(os.Getenv("CREW_TOKEN")))
+
+	familyID, err := client.CurrentUserFamilyID(context.Background())
+	if err != nil || familyID == "" {
+		// Non-fatal: fall back to whatever pairing path exists.
+		fmt.Println("no household link; using an invite code")
+		return
+	}
+	fmt.Println("household:", familyID)
+}
+
 // Example_watcher polls for transactions and reacts as they appear or clear.
 func Example_watcher() {
 	client := crew.NewClient(

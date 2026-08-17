@@ -239,6 +239,17 @@ type Account struct {
 	// from, carrying only ID and Name. Change it with SetSpendSubaccount.
 	// Virtual cards are pinned per-card instead — see DebitCard.Subaccount.
 	PrimarySubaccount *Subaccount `json:"primarySubaccount"`
+	// Family is the household this account belongs to. Every account in a
+	// Crew household shares one, so it identifies members of the same
+	// household without any exchange between them. It is nil only when the
+	// field wasn't requested — see CurrentUserFamilyID.
+	Family *Family `json:"family"`
+}
+
+// Family is a Crew household. Crew's schema exposes no name for it, so the
+// ID is all there is to carry.
+type Family struct {
+	ID string `json:"id"`
 }
 
 // Subaccount is a "pocket" within an account.

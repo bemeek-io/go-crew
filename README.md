@@ -145,6 +145,7 @@ Handlers run synchronously on the watch goroutine — spawn your own goroutine f
 | Method | Description |
 | --- | --- |
 | `CurrentUser(ctx)` | The user with accounts and subaccounts. |
+| `CurrentUserFamilyID(ctx)` | The household ID shared by the user's accounts. |
 | `Accounts(ctx)` | All accounts. |
 | `SpendAccount(ctx)` / `SaveAccount(ctx)` | The primary spending / savings account. |
 | `Subaccounts(ctx)` | All pockets across accounts. |
@@ -156,6 +157,19 @@ Handlers run synchronously on the watch goroutine — spawn your own goroutine f
 | `SetSpendSubaccount(ctx, userID, subID)` | Choose the pocket physical card swipes spend from. |
 
 A pocket's savings goal and an account's target balance are different features. The goal is `Subaccount.GoalCents`, set with `UpdateSubaccount`; the target balance is an account-level rule that sweeps money to or from an overflow account, and returns a `TargetBalanceSetting`.
+
+#### Households
+
+Every account in a Crew household points at the same family, so `Account.Family.ID` identifies members of one household without anything passing between them — useful for auto-linking two people who each sign in independently. `CurrentUserFamilyID` is the shortcut, and it runs a deliberately minimal query since it's typically called on the login path:
+
+```go
+familyID, err := client.CurrentUserFamilyID(ctx)
+if err != nil || familyID == "" {
+	// Non-fatal: no household to link against, so fall back.
+}
+```
+
+A user with no household yields an empty ID and a **nil** error, so a blank result means "nothing to link" rather than a failure. Crew's schema exposes no name for a family, only the ID.
 
 ### Transactions
 
