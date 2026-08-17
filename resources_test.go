@@ -16,7 +16,8 @@ const fakeUserJSON = `{
 			{"id": "sub-1", "name": "Groceries", "subaccountType": "SPENDING", "overallBalance": 25000, "goal": null},
 			{"id": "sub-2", "name": "Rent", "subaccountType": "BILL", "overallBalance": 150000, "goal": 200000}
 		],
-		"primarySubaccount": {"id": "sub-1", "name": "Groceries"}
+		"primarySubaccount": {"id": "sub-1", "name": "Groceries"},
+		"family": {"id": "fam-1"}
 	}]
 }`
 
@@ -42,10 +43,54 @@ func TestCurrentUser(t *testing.T) {
 	if primary == nil || primary.ID != "sub-1" || primary.Name != "Groceries" {
 		t.Errorf("primarySubaccount = %+v", primary)
 	}
+	if fam := u.Accounts[0].Family; fam == nil || fam.ID != "fam-1" {
+		t.Errorf("family = %+v", fam)
+	}
 	// The deployed schema rejects these on User, so the query must not ask.
 	req := f.lastRequest()
 	if strings.Contains(req.Query, "selectedSpendSubaccount") {
 		t.Errorf("query requests selectedSpendSubaccount: %s", req.Query)
+	}
+}
+
+func TestCurrentUserFamilyID(t *testing.T) {
+	c, f := newTestServer(t)
+	f.setGQL("CurrentUserFamilyID", `{"data":{"currentUser":{"accounts":[{"family":{"id":"fam-1"}}]}}}`)
+
+	id, err := c.CurrentUserFamilyID(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentUserFamilyID: %v", err)
+	}
+	if id != "fam-1" {
+		t.Errorf("family ID = %q, want fam-1", id)
+	}
+}
+
+func TestCurrentUserFamilyIDSkipsAccountsWithoutFamily(t *testing.T) {
+	c, f := newTestServer(t)
+	f.setGQL("CurrentUserFamilyID", `{"data":{"currentUser":{"accounts":[{"family":null},{"family":{"id":"fam-2"}}]}}}`)
+
+	id, err := c.CurrentUserFamilyID(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentUserFamilyID: %v", err)
+	}
+	if id != "fam-2" {
+		t.Errorf("family ID = %q, want fam-2", id)
+	}
+}
+
+func TestCurrentUserFamilyIDWithoutFamilyIsNotAnError(t *testing.T) {
+	c, f := newTestServer(t)
+	f.setGQL("CurrentUserFamilyID", `{"data":{"currentUser":{"accounts":[]}}}`)
+
+	// A user with no household is a normal state, not a failure: callers
+	// use a blank ID to mean "nothing to link".
+	id, err := c.CurrentUserFamilyID(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentUserFamilyID: %v", err)
+	}
+	if id != "" {
+		t.Errorf("family ID = %q, want empty", id)
 	}
 }
 
