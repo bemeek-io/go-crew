@@ -2,7 +2,7 @@
 
 Reverse-engineered notes on the Crew Finance consumer API, for anyone building against it without this SDK. Sources: Crew's GraphQL reference at `https://docs.trycrew.com/` (SpectaQL, v1.0.0) and a working third-party integration. Crew issues no public schema file; treat everything here as subject to change.
 
-**Validation status:** confirmed against the live API (2026-08-16): the GraphQL endpoint, the full 4-step OTP auth flow at the `/willow/auth` base (settling the docs' `/willow/auth` vs `/willow/graphql/auth` inconsistency), bearer auth, the response envelope, the `currentUser` accounts/subaccounts query (`overallBalance`, `goal`), and the `cashTransactions` field names below. `CashTransaction` notably has **no** `createdAt` or `date` field — timestamps are `occurredAt` and nullable `clearedAt`; `subaccount` and `debitCard` are nested objects, not ID scalars; and the connection's filter argument is `searchFilters`, not `filter`. Mutation input shapes and transfer fields still come from Crew's docs and have not been exercised live.
+**Validation status:** confirmed against the live API (2026-08-16): the GraphQL endpoint, the full 4-step OTP auth flow at the `/willow/auth` base (settling the docs' `/willow/auth` vs `/willow/graphql/auth` inconsistency), bearer auth, the response envelope, the `currentUser` accounts/subaccounts query (`overallBalance`, `goal`), and the `cashTransactions` field names below. `CashTransaction` notably has **no** `createdAt` or `date` field — timestamps are `occurredAt` and nullable `clearedAt`; `subaccount` and `debitCard` are nested objects, not ID scalars; and the connection's filter argument is `searchFilters`, not `filter`. Mutation input shapes and transfer fields still come from Crew's docs and have not been exercised live — but they were reconciled field-by-field against that reference on 2026-08-17, which corrected a number of names this SDK had guessed wrong (see "Input shapes" below).
 
 ## Base URLs
 
@@ -59,8 +59,8 @@ query CurrentUser { currentUser { id firstName lastName email phone accounts { .
 query Accounts { currentUser { accounts { ...account } } }
 query SpendAccount { currentUser { spendAccount { ...account } } }
 query SaveAccount { currentUser { saveAccount { ...account } } }
-query DebitCards { currentUser { debitCards { id last4 status frozen nickname } } }
-query VirtualDebitCards { currentUser { virtualDebitCards { id last4 status frozen nickname } } }
+query DebitCards { currentUser { debitCards { ...card } } }
+query VirtualDebitCards { currentUser { virtualDebitCards { ...card } } }
 
 query CashTransactions($first: Int, $last: Int, $after: String, $before: String, $filter: CashTransactionFilter) {
   currentUser {
@@ -71,9 +71,9 @@ query CashTransactions($first: Int, $last: Int, $after: String, $before: String,
   }
 }
 
-query Transfers($first: Int, $last: Int, $after: String, $before: String, $filter: TransferFilter) {
+query Transfers($first: Int, $last: Int, $after: String, $before: String) {
   currentUser {
-    transfers(first: $first, last: $last, after: $after, before: $before, searchFilters: $filter) {
+    transfers(first: $first, last: $last, after: $after, before: $before) {
       edges { node { id amount status type memo errorCode isCancellable occurredAt } }
       pageInfo { startCursor endCursor hasNextPage hasPreviousPage }
     }
@@ -81,7 +81,9 @@ query Transfers($first: Int, $last: Int, $after: String, $before: String, $filte
 }
 ```
 
-Account/subaccount fields used: `id type name overallBalance subaccounts { id name type overallBalance goal }`.
+Account/subaccount fields used: `id type name overallBalance subaccounts { id name subaccountType overallBalance goal }`.
+
+Debit card fields used (`...card` above): `id name lastFour status formFactor frozenStatus frozenReason color monthlyLimit monthlySpendToDate`.
 
 Mutations (each `(input: $input)`, returning `{ result { ...fields } }`):
 
@@ -89,6 +91,38 @@ Mutations (each `(input: $input)`, returning `{ result { ...fields } }`):
 - Transactions: `updateCashTransaction` (`cashTransactionId`, `note` — those are the **only** two input fields; merchant details, amount, and status are not editable), `reassignCashTransaction` (`cashTransactionId`, `subaccountId`), `splitCashTransaction` (`cashTransactionId`, `splits`)
 - Transfers: `initiateTransfer` (`accountFromId`, `accountToId`, `amount` in cents, `memo`, `note`), `cancelTransfer`, `updateTransfer`
 - Cards: `freezeDebitCard`, `unfreezeDebitCard`, `cancelDebitCard`, `activateDebitCards`, `createVirtualDebitCard`, `updateVirtualDebitCard`
+
+## Input shapes
+
+GraphQL validation rejects an input object containing any field the schema does not declare, so a mutation carrying an extra key fails outright rather than ignoring it. These shapes come from the published reference and are **not** live-validated. Traps worth knowing:
+
+| Input | Fields | Trap |
+| --- | --- | --- |
+| `UpdateCashTransactionInput` | `cashTransactionId: ID!`, `note: String` | Only the note is editable. |
+| `ReassignCashTransactionInput` | `cashTransactionId: ID!`, `subaccountId: ID` | — |
+| `SplitCashTransactionInput` | `cashTransactionId: ID!`, `splits: [CashTransactionSplitInput]` | Split entries are `{subaccountId, amount}`. |
+| `CreateSubaccountInput` | `accountId: ID!`, `name: String!`, `type`, `note`, `goal`, `targetAmount`, `initialTransferAmount`, `piggyBanked` | `goal` is the pocket's savings target. |
+| `UpdateSubaccountInput` | `subaccountId: ID!`, `name`, `type`, `note`, `goal`, `targetAmount`, `piggyBanked` | This is how a savings goal is set. |
+| `SetTargetBalanceInput` | `accountId: ID!`, `targetBalance: Int!`, `buffer`, `direction` | Keyed on an **account**, not a subaccount, and returns a `TargetBalanceSetting`, not a `Subaccount`. Unrelated to pocket goals. |
+| `RemoveTargetBalanceInput` | `accountId: ID!` | Same — account, not subaccount. |
+| `InitiateTransferInput` | `accountFromId: ID!`, `accountToId: ID!`, `amount: Int!`, `memo`, `note`, `type` | IDs may be an account **or** a subaccount. |
+| `UpdateTransferInput` | `transferId: ID!`, `memo`, `note` | — |
+| `CancelTransferInput` | `transferId: ID!` | — |
+| `FreezeDebitCardInput` | `debitCardId: ID!`, `reason: CardFrozenReason!` | The reason is **required**. |
+| `UnfreezeDebitCardInput` / `CancelDebitCardInput` | `debitCardId: ID!` | — |
+| `ActivateDebitCardsInput` | `debitCardId: [ID!]!` | Singular name, list type. |
+| `CreateVirtualDebitCardInput` | `userId: ID!`, `name`, `subaccountId`, `monthlyLimit`, `cardColor`, `formFactor`, `cancelAfter`, `type` | `userId` is required; the label field is `name`, not `nickname`. |
+| `UpdateVirtualDebitCardInput` | `debitCardId: ID!`, `name`, `subaccountId`, `monthlyLimit`, `cardColor`, `cancelAfter` | `debitCardId`, not `virtualDebitCardId`. |
+
+Enum values: `CardFrozenReason` = FRAUD_DETECTED, FROZEN_BY_BANK, LOST_OR_STOLEN, PARENT_REQUESTED, USER_FROZEN, USER_REQUESTED; `CardFrozenStatus` = FAILED, FREEZING, FROZEN, UNFREEZING, UNFROZEN; `DebitCardStatus` = ACTIVATED, ACTIVATING, DEACTIVATED, DEACTIVATING, EMANCIPATED, EXPIRED, FAILED, ISSUED, ISSUING; `DebitCardFormFactor` = PHYSICAL, PROVISIONAL, SINGLE_USE, VIRTUAL; `TargetBalanceSettingDirection` = BOTH, FROM_OVERFLOW, TO_OVERFLOW.
+
+## Type-name traps
+
+- **There is no `VirtualDebitCard` type.** `currentUser.virtualDebitCards` returns `[DebitCard!]!`, as do all the card mutations. Virtual cards are `DebitCard`s whose `formFactor` is `VIRTUAL` or `SINGLE_USE`.
+- **`DebitCard` field names**: `lastFour` (not `last4`), `name` (not `nickname`), and freezing is `frozenStatus` + `frozenReason` (not a `frozen` boolean).
+- **`Subaccount.type` is an `AccountType`** — the parent account's kind. The pocket's own kind is `subaccountType: SubaccountType!`.
+- **`currentUser.transfers` takes no `searchFilters` argument**, only `first`/`last`/`after`/`before`. `TransferFilter` applies to the account-level `transfersFrom`/`transfersTo` connections. By contrast `currentUser.cashTransactions` *does* accept `searchFilters`.
+- **`CashTransactionFilter.debitCardId` is `[ID!]`**, a list despite the singular name.
 
 Enums (observed/documented values): `SubaccountType` = BILL, BILL_RESERVE, CREDIT, CREDIT_RESERVE, SAVINGS, SPENDING; `TransferStatus` = CANCELED, CANCELING, COMPLETED, DECISION_ACCEPTED, DECISION_MANUAL_REVIEW, DECISION_PENDING, DECISION_REJECTED, DECISION_RETRYING; `TransferType` = ACH, ADJUSTMENT, ALLOWANCE, BILL_SUBACCOUNT, BONUS, BOOK, CASH_DEPOSIT, CHECK, …
 
@@ -101,7 +135,6 @@ Enums (observed/documented values): `SubaccountType` = BILL, BILL_RESERVE, CREDI
 - Fields confirmed to exist but not yet mapped by the SDK (query via `Execute`): `account`, `transfer`, `checkDeposit`, `originalCheckDepositTransaction`, `fundingEvent`, `seasoning`, `disputeReasons`, `enrichmentId`, `relatedTransactions`, `splitTransactions`, `permittedActions`.
 - Confirmed NOT to exist: `payee`, `counterparty`, `category`, `location`, `createdAt`, `date`, `pending`, `direction`, `statementDescriptor`.
 - `description` is **deprecated** in the published schema ("use memo instead"). It is still queryable and this SDK still maps it, but new code should read `memo`.
-- Input validation is strict: GraphQL rejects an input object containing any field the schema does not declare, so a mutation carrying an extra key fails outright rather than ignoring it. Input shapes here come from the published reference at <https://docs.trycrew.com/> and, unlike the query fields above, are **not** live-validated.
 
 ## Known unknowns
 

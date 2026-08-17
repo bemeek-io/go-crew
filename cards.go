@@ -1,8 +1,11 @@
 package crew
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
-const debitCardFields = `id last4 status frozen nickname`
+const debitCardFields = `id name lastFour status formFactor frozenStatus frozenReason color monthlyLimit monthlySpendToDate`
 
 const queryDebitCards = `query DebitCards {
   currentUser {
@@ -29,11 +32,13 @@ func (c *Client) DebitCards(ctx context.Context) ([]DebitCard, error) {
 	return out.CurrentUser.DebitCards, nil
 }
 
-// VirtualDebitCards fetches the user's virtual debit cards.
-func (c *Client) VirtualDebitCards(ctx context.Context) ([]VirtualDebitCard, error) {
+// VirtualDebitCards fetches the user's virtual debit cards. Crew has no
+// distinct virtual card type — these are DebitCards whose FormFactor is
+// VIRTUAL or SINGLE_USE.
+func (c *Client) VirtualDebitCards(ctx context.Context) ([]DebitCard, error) {
 	var out struct {
 		CurrentUser struct {
-			VirtualDebitCards []VirtualDebitCard `json:"virtualDebitCards"`
+			VirtualDebitCards []DebitCard `json:"virtualDebitCards"`
 		} `json:"currentUser"`
 	}
 	if err := c.Execute(ctx, queryVirtualDebitCards, nil, &out); err != nil {
@@ -48,9 +53,12 @@ const mutationFreezeDebitCard = `mutation FreezeDebitCard($input: FreezeDebitCar
   }
 }`
 
-// FreezeDebitCard freezes a debit card, blocking new authorizations.
-func (c *Client) FreezeDebitCard(ctx context.Context, cardID string) (*DebitCard, error) {
-	return c.cardMutation(ctx, mutationFreezeDebitCard, "freezeDebitCard", cardID)
+// FreezeDebitCard freezes a debit card, blocking new authorizations. Crew
+// requires a reason; pass CardFrozenReasonUserRequested for an ordinary
+// user-initiated freeze.
+func (c *Client) FreezeDebitCard(ctx context.Context, cardID string, reason CardFrozenReason) (*DebitCard, error) {
+	input := map[string]any{"debitCardId": cardID, "reason": reason}
+	return c.cardMutation(ctx, mutationFreezeDebitCard, "freezeDebitCard", input)
 }
 
 const mutationUnfreezeDebitCard = `mutation UnfreezeDebitCard($input: UnfreezeDebitCardInput!) {
@@ -61,7 +69,8 @@ const mutationUnfreezeDebitCard = `mutation UnfreezeDebitCard($input: UnfreezeDe
 
 // UnfreezeDebitCard unfreezes a previously frozen debit card.
 func (c *Client) UnfreezeDebitCard(ctx context.Context, cardID string) (*DebitCard, error) {
-	return c.cardMutation(ctx, mutationUnfreezeDebitCard, "unfreezeDebitCard", cardID)
+	input := map[string]any{"debitCardId": cardID}
+	return c.cardMutation(ctx, mutationUnfreezeDebitCard, "unfreezeDebitCard", input)
 }
 
 const mutationCancelDebitCard = `mutation CancelDebitCard($input: CancelDebitCardInput!) {
@@ -72,27 +81,21 @@ const mutationCancelDebitCard = `mutation CancelDebitCard($input: CancelDebitCar
 
 // CancelDebitCard permanently cancels a debit card.
 func (c *Client) CancelDebitCard(ctx context.Context, cardID string) (*DebitCard, error) {
-	return c.cardMutation(ctx, mutationCancelDebitCard, "cancelDebitCard", cardID)
+	input := map[string]any{"debitCardId": cardID}
+	return c.cardMutation(ctx, mutationCancelDebitCard, "cancelDebitCard", input)
 }
 
 // cardMutation runs a single-card mutation whose payload wraps a result
 // debit card under the given field name.
-func (c *Client) cardMutation(ctx context.Context, mutation, field, cardID string) (*DebitCard, error) {
+func (c *Client) cardMutation(ctx context.Context, mutation, field string, input map[string]any) (*DebitCard, error) {
 	var out map[string]struct {
 		Result DebitCard `json:"result"`
 	}
-	input := map[string]any{"debitCardId": cardID}
 	if err := c.Execute(ctx, mutation, map[string]any{"input": input}, &out); err != nil {
 		return nil, err
 	}
 	payload := out[field]
 	return &payload.Result, nil
-}
-
-// ActivateDebitCardsInput are the parameters for ActivateDebitCards.
-type ActivateDebitCardsInput struct {
-	DebitCardIDs []string `json:"debitCardIds"`
-	Last4        string   `json:"last4,omitempty"`
 }
 
 const mutationActivateDebitCards = `mutation ActivateDebitCards($input: ActivateDebitCardsInput!) {
@@ -102,22 +105,34 @@ const mutationActivateDebitCards = `mutation ActivateDebitCards($input: Activate
 }`
 
 // ActivateDebitCards activates newly received physical debit cards.
-func (c *Client) ActivateDebitCards(ctx context.Context, in ActivateDebitCardsInput) ([]DebitCard, error) {
+func (c *Client) ActivateDebitCards(ctx context.Context, cardIDs []string) ([]DebitCard, error) {
 	var out struct {
 		ActivateDebitCards struct {
 			Result []DebitCard `json:"result"`
 		} `json:"activateDebitCards"`
 	}
-	if err := c.Execute(ctx, mutationActivateDebitCards, map[string]any{"input": in}, &out); err != nil {
+	// The schema names this list field debitCardId, singular.
+	input := map[string]any{"debitCardId": cardIDs}
+	if err := c.Execute(ctx, mutationActivateDebitCards, map[string]any{"input": input}, &out); err != nil {
 		return nil, err
 	}
 	return out.ActivateDebitCards.Result, nil
 }
 
 // CreateVirtualDebitCardInput are the parameters for CreateVirtualDebitCard.
+// UserID is required and identifies the card's owner — use CurrentUser to
+// get your own ID.
 type CreateVirtualDebitCardInput struct {
-	Nickname     string `json:"nickname,omitempty"`
+	UserID       string `json:"userId"`
+	Name         string `json:"name,omitempty"`
 	SubaccountID string `json:"subaccountId,omitempty"`
+	// MonthlyLimitCents caps spend per calendar month, or nil for no cap.
+	MonthlyLimitCents *int64                `json:"monthlyLimit,omitempty"`
+	CardColor         DebitCardColor        `json:"cardColor,omitempty"`
+	FormFactor        VirtualCardFormFactor `json:"formFactor,omitempty"`
+	// CancelAfter auto-cancels the card at the given time, or nil to leave
+	// it open-ended.
+	CancelAfter *time.Time `json:"cancelAfter,omitempty"`
 }
 
 const mutationCreateVirtualDebitCard = `mutation CreateVirtualDebitCard($input: CreateVirtualDebitCardInput!) {
@@ -127,10 +142,10 @@ const mutationCreateVirtualDebitCard = `mutation CreateVirtualDebitCard($input: 
 }`
 
 // CreateVirtualDebitCard creates a new virtual debit card.
-func (c *Client) CreateVirtualDebitCard(ctx context.Context, in CreateVirtualDebitCardInput) (*VirtualDebitCard, error) {
+func (c *Client) CreateVirtualDebitCard(ctx context.Context, in CreateVirtualDebitCardInput) (*DebitCard, error) {
 	var out struct {
 		CreateVirtualDebitCard struct {
-			Result VirtualDebitCard `json:"result"`
+			Result DebitCard `json:"result"`
 		} `json:"createVirtualDebitCard"`
 	}
 	if err := c.Execute(ctx, mutationCreateVirtualDebitCard, map[string]any{"input": in}, &out); err != nil {
@@ -141,8 +156,16 @@ func (c *Client) CreateVirtualDebitCard(ctx context.Context, in CreateVirtualDeb
 
 // UpdateVirtualDebitCardInput are the parameters for UpdateVirtualDebitCard.
 type UpdateVirtualDebitCardInput struct {
-	VirtualDebitCardID string `json:"virtualDebitCardId"`
-	Nickname           string `json:"nickname,omitempty"`
+	DebitCardID  string `json:"debitCardId"`
+	Name         string `json:"name,omitempty"`
+	SubaccountID string `json:"subaccountId,omitempty"`
+	// MonthlyLimitCents caps spend per calendar month, or nil to leave the
+	// existing limit unchanged.
+	MonthlyLimitCents *int64         `json:"monthlyLimit,omitempty"`
+	CardColor         DebitCardColor `json:"cardColor,omitempty"`
+	// CancelAfter auto-cancels the card at the given time, or nil to leave
+	// the existing setting unchanged.
+	CancelAfter *time.Time `json:"cancelAfter,omitempty"`
 }
 
 const mutationUpdateVirtualDebitCard = `mutation UpdateVirtualDebitCard($input: UpdateVirtualDebitCardInput!) {
@@ -152,10 +175,10 @@ const mutationUpdateVirtualDebitCard = `mutation UpdateVirtualDebitCard($input: 
 }`
 
 // UpdateVirtualDebitCard updates a virtual debit card's attributes.
-func (c *Client) UpdateVirtualDebitCard(ctx context.Context, in UpdateVirtualDebitCardInput) (*VirtualDebitCard, error) {
+func (c *Client) UpdateVirtualDebitCard(ctx context.Context, in UpdateVirtualDebitCardInput) (*DebitCard, error) {
 	var out struct {
 		UpdateVirtualDebitCard struct {
-			Result VirtualDebitCard `json:"result"`
+			Result DebitCard `json:"result"`
 		} `json:"updateVirtualDebitCard"`
 	}
 	if err := c.Execute(ctx, mutationUpdateVirtualDebitCard, map[string]any{"input": in}, &out); err != nil {

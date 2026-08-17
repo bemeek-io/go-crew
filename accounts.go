@@ -75,8 +75,11 @@ func (c *Client) Subaccounts(ctx context.Context) ([]Subaccount, error) {
 
 // CreateSubaccountInput are the parameters for CreateSubaccount.
 type CreateSubaccountInput struct {
-	AccountID string `json:"accountId"`
-	Name      string `json:"name"`
+	AccountID string         `json:"accountId"`
+	Name      string         `json:"name"`
+	Type      SubaccountType `json:"type,omitempty"`
+	Note      string         `json:"note,omitempty"`
+	// GoalCents is the pocket's savings target.
 	GoalCents *int64 `json:"goal,omitempty"`
 }
 
@@ -99,10 +102,16 @@ func (c *Client) CreateSubaccount(ctx context.Context, in CreateSubaccountInput)
 	return &out.CreateSubaccount.Result, nil
 }
 
-// UpdateSubaccountInput are the parameters for UpdateSubaccount.
+// UpdateSubaccountInput are the parameters for UpdateSubaccount. This is
+// also how a pocket's savings goal is set — SetTargetBalance is a separate,
+// account-level feature.
 type UpdateSubaccountInput struct {
-	SubaccountID string `json:"subaccountId"`
-	Name         string `json:"name,omitempty"`
+	SubaccountID string         `json:"subaccountId"`
+	Name         string         `json:"name,omitempty"`
+	Type         SubaccountType `json:"type,omitempty"`
+	Note         string         `json:"note,omitempty"`
+	// GoalCents is the pocket's savings target.
+	GoalCents *int64 `json:"goal,omitempty"`
 }
 
 const mutationUpdateSubaccount = `mutation UpdateSubaccount($input: UpdateSubaccountInput!) {
@@ -136,21 +145,38 @@ func (c *Client) DeleteSubaccount(ctx context.Context, subaccountID string) erro
 	return c.Execute(ctx, mutationDeleteSubaccount, map[string]any{"input": input}, nil)
 }
 
+const targetBalanceSettingFields = `id targetBalance buffer direction enabled`
+
+// SetTargetBalanceInput are the parameters for SetTargetBalance. Note that
+// target balances apply to an *account*, not a subaccount.
+type SetTargetBalanceInput struct {
+	AccountID          string `json:"accountId"`
+	TargetBalanceCents int64  `json:"targetBalance"`
+	// BufferCents is the slack allowed around the target before money is
+	// swept, or nil to let Crew choose.
+	BufferCents *int64 `json:"buffer,omitempty"`
+	// Direction limits which way money may be swept.
+	Direction TargetBalanceSettingDirection `json:"direction,omitempty"`
+}
+
 const mutationSetTargetBalance = `mutation SetTargetBalance($input: SetTargetBalanceInput!) {
   setTargetBalance(input: $input) {
-    result { ` + subaccountFields + ` }
+    result { ` + targetBalanceSettingFields + ` }
   }
 }`
 
-// SetTargetBalance sets a subaccount's savings target, in cents.
-func (c *Client) SetTargetBalance(ctx context.Context, subaccountID string, amountCents int64) (*Subaccount, error) {
+// SetTargetBalance sets an account's target balance, sweeping money to or
+// from its overflow account to maintain it.
+//
+// This is not a pocket savings goal: to set one of those, pass GoalCents to
+// UpdateSubaccount.
+func (c *Client) SetTargetBalance(ctx context.Context, in SetTargetBalanceInput) (*TargetBalanceSetting, error) {
 	var out struct {
 		SetTargetBalance struct {
-			Result Subaccount `json:"result"`
+			Result TargetBalanceSetting `json:"result"`
 		} `json:"setTargetBalance"`
 	}
-	input := map[string]any{"subaccountId": subaccountID, "targetBalance": amountCents}
-	if err := c.Execute(ctx, mutationSetTargetBalance, map[string]any{"input": input}, &out); err != nil {
+	if err := c.Execute(ctx, mutationSetTargetBalance, map[string]any{"input": in}, &out); err != nil {
 		return nil, err
 	}
 	return &out.SetTargetBalance.Result, nil
@@ -158,18 +184,18 @@ func (c *Client) SetTargetBalance(ctx context.Context, subaccountID string, amou
 
 const mutationRemoveTargetBalance = `mutation RemoveTargetBalance($input: RemoveTargetBalanceInput!) {
   removeTargetBalance(input: $input) {
-    result { ` + subaccountFields + ` }
+    result { ` + targetBalanceSettingFields + ` }
   }
 }`
 
-// RemoveTargetBalance clears a subaccount's savings target.
-func (c *Client) RemoveTargetBalance(ctx context.Context, subaccountID string) (*Subaccount, error) {
+// RemoveTargetBalance clears an account's target balance.
+func (c *Client) RemoveTargetBalance(ctx context.Context, accountID string) (*TargetBalanceSetting, error) {
 	var out struct {
 		RemoveTargetBalance struct {
-			Result Subaccount `json:"result"`
+			Result TargetBalanceSetting `json:"result"`
 		} `json:"removeTargetBalance"`
 	}
-	input := map[string]any{"subaccountId": subaccountID}
+	input := map[string]any{"accountId": accountID}
 	if err := c.Execute(ctx, mutationRemoveTargetBalance, map[string]any{"input": input}, &out); err != nil {
 		return nil, err
 	}

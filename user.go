@@ -2,7 +2,9 @@ package crew
 
 import "context"
 
-const subaccountFields = `id name type overallBalance goal`
+// subaccountType, not type: on a Subaccount, type is the parent account's
+// AccountType, while subaccountType is the pocket's own kind.
+const subaccountFields = `id name subaccountType overallBalance goal`
 
 const accountFields = `id type name overallBalance subaccounts { ` + subaccountFields + ` }`
 

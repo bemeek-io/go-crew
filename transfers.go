@@ -7,22 +7,24 @@ import (
 
 const transferFields = `id amount status type memo errorCode isCancellable occurredAt`
 
-const queryTransfers = `query Transfers($first: Int, $last: Int, $after: String, $before: String, $filter: TransferFilter) {
+// Unlike cashTransactions, currentUser.transfers takes no searchFilters
+// argument — filtering transfers is only available on the account-level
+// transfersFrom/transfersTo connections.
+const queryTransfers = `query Transfers($first: Int, $last: Int, $after: String, $before: String) {
   currentUser {
-    transfers(first: $first, last: $last, after: $after, before: $before, searchFilters: $filter) {
+    transfers(first: $first, last: $last, after: $after, before: $before) {
       edges { node { ` + transferFields + ` } }
       pageInfo { startCursor endCursor hasNextPage hasPreviousPage }
     }
   }
 }`
 
-// TransfersOptions control pagination and filtering for Transfers.
+// TransfersOptions control pagination for Transfers.
 type TransfersOptions struct {
 	First  int
 	Last   int
 	After  string
 	Before string
-	Filter *TransferFilter
 }
 
 // TransferPage is one page of transfers.
@@ -38,11 +40,7 @@ func (c *Client) Transfers(ctx context.Context, opts TransfersOptions) (*Transfe
 			Transfers connection[Transfer] `json:"transfers"`
 		} `json:"currentUser"`
 	}
-	var filter any
-	if opts.Filter != nil {
-		filter = opts.Filter
-	}
-	vars := connectionVariables(opts.First, opts.Last, opts.After, opts.Before, filter)
+	vars := connectionVariables(opts.First, opts.Last, opts.After, opts.Before, nil)
 	if err := c.Execute(ctx, queryTransfers, vars, &out); err != nil {
 		return nil, err
 	}
@@ -52,11 +50,11 @@ func (c *Client) Transfers(ctx context.Context, opts TransfersOptions) (*Transfe
 
 // AllTransfers iterates every transfer, fetching pages of 100 as needed.
 // Iteration stops after yielding a non-nil error.
-func (c *Client) AllTransfers(ctx context.Context, filter *TransferFilter) iter.Seq2[Transfer, error] {
+func (c *Client) AllTransfers(ctx context.Context) iter.Seq2[Transfer, error] {
 	return func(yield func(Transfer, error) bool) {
 		after := ""
 		for {
-			page, err := c.Transfers(ctx, TransfersOptions{First: 100, After: after, Filter: filter})
+			page, err := c.Transfers(ctx, TransfersOptions{First: 100, After: after})
 			if err != nil {
 				yield(Transfer{}, err)
 				return

@@ -98,6 +98,115 @@ const (
 
 func (s TransferStatus) String() string { return string(s) }
 
+// DebitCardStatus is the lifecycle state of a debit card. Unknown values
+// from the API pass through unchanged.
+type DebitCardStatus string
+
+// Known debit card statuses.
+const (
+	DebitCardStatusActivated    DebitCardStatus = "ACTIVATED"
+	DebitCardStatusActivating   DebitCardStatus = "ACTIVATING"
+	DebitCardStatusDeactivated  DebitCardStatus = "DEACTIVATED"
+	DebitCardStatusDeactivating DebitCardStatus = "DEACTIVATING"
+	DebitCardStatusEmancipated  DebitCardStatus = "EMANCIPATED"
+	DebitCardStatusExpired      DebitCardStatus = "EXPIRED"
+	DebitCardStatusFailed       DebitCardStatus = "FAILED"
+	DebitCardStatusIssued       DebitCardStatus = "ISSUED"
+	DebitCardStatusIssuing      DebitCardStatus = "ISSUING"
+)
+
+func (s DebitCardStatus) String() string { return string(s) }
+
+// DebitCardFormFactor distinguishes physical cards from virtual ones.
+// Unknown values from the API pass through unchanged.
+type DebitCardFormFactor string
+
+// Known debit card form factors.
+const (
+	DebitCardFormFactorPhysical    DebitCardFormFactor = "PHYSICAL"
+	DebitCardFormFactorProvisional DebitCardFormFactor = "PROVISIONAL"
+	DebitCardFormFactorSingleUse   DebitCardFormFactor = "SINGLE_USE"
+	DebitCardFormFactorVirtual     DebitCardFormFactor = "VIRTUAL"
+)
+
+func (f DebitCardFormFactor) String() string { return string(f) }
+
+// CardFrozenStatus is a debit card's freeze state. Note that Crew models
+// freezing as a state machine, not a boolean: a card may be mid-transition
+// (FREEZING, UNFREEZING). Unknown values pass through unchanged.
+type CardFrozenStatus string
+
+// Known card freeze states.
+const (
+	CardFrozenStatusFailed     CardFrozenStatus = "FAILED"
+	CardFrozenStatusFreezing   CardFrozenStatus = "FREEZING"
+	CardFrozenStatusFrozen     CardFrozenStatus = "FROZEN"
+	CardFrozenStatusUnfreezing CardFrozenStatus = "UNFREEZING"
+	CardFrozenStatusUnfrozen   CardFrozenStatus = "UNFROZEN"
+)
+
+func (s CardFrozenStatus) String() string { return string(s) }
+
+// CardFrozenReason explains why a debit card was frozen. FreezeDebitCard
+// requires one. Unknown values from the API pass through unchanged.
+type CardFrozenReason string
+
+// Known freeze reasons.
+const (
+	CardFrozenReasonFraudDetected   CardFrozenReason = "FRAUD_DETECTED"
+	CardFrozenReasonFrozenByBank    CardFrozenReason = "FROZEN_BY_BANK"
+	CardFrozenReasonLostOrStolen    CardFrozenReason = "LOST_OR_STOLEN"
+	CardFrozenReasonParentRequested CardFrozenReason = "PARENT_REQUESTED"
+	CardFrozenReasonUserFrozen      CardFrozenReason = "USER_FROZEN"
+	CardFrozenReasonUserRequested   CardFrozenReason = "USER_REQUESTED"
+)
+
+func (r CardFrozenReason) String() string { return string(r) }
+
+// DebitCardColor is the card's appearance in the Crew app. Unknown values
+// from the API pass through unchanged.
+type DebitCardColor string
+
+// Known card colors.
+const (
+	DebitCardColorBanana DebitCardColor = "BANANA"
+	DebitCardColorBeige  DebitCardColor = "BEIGE"
+	DebitCardColorBlack  DebitCardColor = "BLACK"
+	DebitCardColorCoral  DebitCardColor = "CORAL"
+	DebitCardColorDenim  DebitCardColor = "DENIM"
+	DebitCardColorJade   DebitCardColor = "JADE"
+	DebitCardColorLilac  DebitCardColor = "LILAC"
+	DebitCardColorMetal  DebitCardColor = "METAL"
+	DebitCardColorTeal   DebitCardColor = "TEAL"
+)
+
+func (c DebitCardColor) String() string { return string(c) }
+
+// VirtualCardFormFactor is the form factor requested when creating a
+// virtual card. Unknown values from the API pass through unchanged.
+type VirtualCardFormFactor string
+
+// Known virtual card form factors.
+const (
+	VirtualCardFormFactorSingleUse VirtualCardFormFactor = "SINGLE_USE"
+	VirtualCardFormFactorVirtual   VirtualCardFormFactor = "VIRTUAL"
+)
+
+func (f VirtualCardFormFactor) String() string { return string(f) }
+
+// TargetBalanceSettingDirection controls which way money moves between an
+// account and its overflow account. Unknown values pass through unchanged.
+type TargetBalanceSettingDirection string
+
+// Known target balance directions.
+const (
+	TargetBalanceDirectionBoth         TargetBalanceSettingDirection = "BOTH"
+	TargetBalanceDirectionFromOverflow TargetBalanceSettingDirection = "FROM_OVERFLOW"
+	TargetBalanceDirectionToOverflow   TargetBalanceSettingDirection = "TO_OVERFLOW"
+)
+
+func (d TargetBalanceSettingDirection) String() string { return string(d) }
+
 // TransferSide filters transactions by direction.
 type TransferSide string
 
@@ -130,11 +239,16 @@ type Account struct {
 
 // Subaccount is a "pocket" within an account.
 type Subaccount struct {
-	ID           string         `json:"id"`
-	Name         string         `json:"name"`
-	Type         SubaccountType `json:"type"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Type is the pocket's kind. It maps the schema's subaccountType field —
+	// Subaccount.type is an AccountType (the parent account's kind), not a
+	// SubaccountType.
+	Type         SubaccountType `json:"subaccountType"`
 	BalanceCents int64          `json:"overallBalance"`
-	// GoalCents is the savings target ("goal"), or nil if none is set.
+	// GoalCents is the savings target ("goal"), or nil if none is set. Set
+	// it with UpdateSubaccount; SetTargetBalance is a different,
+	// account-level feature.
 	GoalCents *int64 `json:"goal"`
 }
 
@@ -201,22 +315,42 @@ type Transfer struct {
 	OccurredAt    time.Time      `json:"occurredAt"`
 }
 
-// DebitCard is a physical Crew debit card.
+// DebitCard is a Crew debit card. Crew has no separate virtual card type:
+// virtual cards are DebitCards whose FormFactor is VIRTUAL or SINGLE_USE.
 type DebitCard struct {
-	ID       string `json:"id"`
-	Last4    string `json:"last4"`
-	Status   string `json:"status"`
-	Frozen   bool   `json:"frozen"`
-	Nickname string `json:"nickname"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// LastFour is the last four digits of the card number.
+	LastFour     string              `json:"lastFour"`
+	Status       DebitCardStatus     `json:"status"`
+	FormFactor   DebitCardFormFactor `json:"formFactor"`
+	FrozenStatus CardFrozenStatus    `json:"frozenStatus"`
+	FrozenReason CardFrozenReason    `json:"frozenReason"`
+	Color        DebitCardColor      `json:"color"`
+	// MonthlyLimitCents is the card's monthly spend cap, or nil if uncapped.
+	MonthlyLimitCents *int64 `json:"monthlyLimit"`
+	// MonthlySpendToDateCents is spend so far in the current calendar month.
+	MonthlySpendToDateCents int64 `json:"monthlySpendToDate"`
 }
 
-// VirtualDebitCard is a virtual Crew debit card.
-type VirtualDebitCard struct {
-	ID       string `json:"id"`
-	Last4    string `json:"last4"`
-	Status   string `json:"status"`
-	Frozen   bool   `json:"frozen"`
-	Nickname string `json:"nickname"`
+// IsFrozen reports whether the card is fully frozen. Cards mid-transition
+// (FREEZING, UNFREEZING) report false — inspect FrozenStatus for those.
+func (c DebitCard) IsFrozen() bool { return c.FrozenStatus == CardFrozenStatusFrozen }
+
+// IsVirtual reports whether the card is virtual rather than physical.
+func (c DebitCard) IsVirtual() bool {
+	return c.FormFactor == DebitCardFormFactorVirtual || c.FormFactor == DebitCardFormFactorSingleUse
+}
+
+// TargetBalanceSetting is an account-level rule that keeps an account at a
+// target balance by sweeping money to or from an overflow account. It is
+// not a subaccount savings goal — see Subaccount.GoalCents for that.
+type TargetBalanceSetting struct {
+	ID                 string                        `json:"id"`
+	TargetBalanceCents int64                         `json:"targetBalance"`
+	BufferCents        int64                         `json:"buffer"`
+	Direction          TargetBalanceSettingDirection `json:"direction"`
+	Enabled            bool                          `json:"enabled"`
 }
 
 // PageInfo is Relay-style pagination metadata.
@@ -235,16 +369,12 @@ type IntegerRange struct {
 
 // CashTransactionFilter narrows a cash transaction query server-side.
 type CashTransactionFilter struct {
-	Amount        *IntegerRange `json:"amount,omitempty"`
-	DebitCardID   string        `json:"debitCardId,omitempty"`
-	FuzzySearch   string        `json:"fuzzySearch,omitempty"`
-	SubaccountID  string        `json:"subaccountId,omitempty"`
-	SubaccountIDs []string      `json:"subaccountIds,omitempty"`
-	TransferSide  TransferSide  `json:"transferSide,omitempty"`
-	Type          string        `json:"type,omitempty"`
-}
-
-// TransferFilter narrows a transfer query server-side.
-type TransferFilter struct {
-	Status TransferStatus `json:"status,omitempty"`
+	Amount *IntegerRange `json:"amount,omitempty"`
+	// DebitCardIDs serializes to the schema's list-typed debitCardId field.
+	DebitCardIDs  []string     `json:"debitCardId,omitempty"`
+	FuzzySearch   string       `json:"fuzzySearch,omitempty"`
+	SubaccountID  string       `json:"subaccountId,omitempty"`
+	SubaccountIDs []string     `json:"subaccountIds,omitempty"`
+	TransferSide  TransferSide `json:"transferSide,omitempty"`
+	Type          string       `json:"type,omitempty"`
 }
