@@ -160,11 +160,13 @@ Handlers run synchronously on the watch goroutine — spawn your own goroutine f
 | --- | --- |
 | `CashTransactions(ctx, opts)` | One page of transactions (Relay cursors). |
 | `AllCashTransactions(ctx, filter)` | Iterator over every transaction. |
-| `UpdateCashTransaction(ctx, in)` | Edit a transaction's description. |
+| `UpdateCashTransaction(ctx, in)` | Set a transaction's note. |
 | `ReassignCashTransaction(ctx, txID, subID)` | Move a transaction to another pocket. |
 | `SplitCashTransaction(ctx, in)` | Split a transaction across pockets. |
 
-Each `CashTransaction` carries rich detail: use **`Payee()`** for the display name (the enriched `Title`, e.g. "Costco" — `MerchantName` and `Description` are usually null on card transactions), plus `MCC`, merchant address fields, `ImageURL` (merchant logo), `Note`/`Memo`, `OccurredAt`/`ClearedAt`, running balance totals, and the associated `Subaccount` and `DebitCard`.
+Each `CashTransaction` carries rich detail: use **`Payee()`** for the display name (the enriched `Title`, e.g. "Costco" — `MerchantName` and `Description` are usually null on card transactions), plus `MCC`, merchant address fields, `ImageURL` (merchant logo), `Note`/`Memo`, `OccurredAt`/`ClearedAt`, running balance totals, and the associated `Subaccount` and `DebitCard`. `Description` is deprecated in Crew's schema in favor of `Memo`.
+
+Only the note is user-editable: `UpdateCashTransaction` takes a `CashTransactionID` and a `Note`. Merchant details, amount, and status are set by Crew.
 
 ### Transfers
 

@@ -252,14 +252,25 @@ func TestAllCashTransactionsYieldsError(t *testing.T) {
 
 func TestUpdateCashTransaction(t *testing.T) {
 	c, f := newTestServer(t)
-	f.setGQL("updateCashTransaction", `{"data":{"updateCashTransaction":{"result":{"id":"tx-1","description":"Espresso"}}}}`)
+	f.setGQL("updateCashTransaction", `{"data":{"updateCashTransaction":{"result":{"id":"tx-1","note":"Espresso"}}}}`)
 
-	tx, err := c.UpdateCashTransaction(context.Background(), UpdateCashTransactionInput{CashTransactionID: "tx-1", Description: "Espresso"})
+	tx, err := c.UpdateCashTransaction(context.Background(), UpdateCashTransactionInput{CashTransactionID: "tx-1", Note: "Espresso"})
 	if err != nil {
 		t.Fatalf("UpdateCashTransaction: %v", err)
 	}
-	if tx.Description != "Espresso" {
+	if tx.Note != "Espresso" {
 		t.Errorf("tx = %+v", tx)
+	}
+	// Crew's UpdateCashTransactionInput accepts only cashTransactionId and
+	// note; any other key fails GraphQL input validation server-side.
+	input := f.lastRequest().Variables["input"].(map[string]any)
+	if input["cashTransactionId"] != "tx-1" || input["note"] != "Espresso" {
+		t.Errorf("input = %v", input)
+	}
+	for key := range input {
+		if key != "cashTransactionId" && key != "note" {
+			t.Errorf("input contains unsupported field %q: %v", key, input)
+		}
 	}
 }
 

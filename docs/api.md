@@ -86,7 +86,7 @@ Account/subaccount fields used: `id type name overallBalance subaccounts { id na
 Mutations (each `(input: $input)`, returning `{ result { ...fields } }`):
 
 - Subaccounts: `createSubaccount`, `updateSubaccount`, `deleteSubaccount`, `setTargetBalance`, `removeTargetBalance`
-- Transactions: `updateCashTransaction`, `reassignCashTransaction`, `splitCashTransaction`
+- Transactions: `updateCashTransaction` (`cashTransactionId`, `note` — those are the **only** two input fields; merchant details, amount, and status are not editable), `reassignCashTransaction` (`cashTransactionId`, `subaccountId`), `splitCashTransaction` (`cashTransactionId`, `splits`)
 - Transfers: `initiateTransfer` (`accountFromId`, `accountToId`, `amount` in cents, `memo`, `note`), `cancelTransfer`, `updateTransfer`
 - Cards: `freezeDebitCard`, `unfreezeDebitCard`, `cancelDebitCard`, `activateDebitCards`, `createVirtualDebitCard`, `updateVirtualDebitCard`
 
@@ -100,6 +100,8 @@ Enums (observed/documented values): `SubaccountType` = BILL, BILL_RESERVE, CREDI
 - `subaccountRunningTotal` / `accountRunningTotal` are the pocket/account balances (cents) after the transaction.
 - Fields confirmed to exist but not yet mapped by the SDK (query via `Execute`): `account`, `transfer`, `checkDeposit`, `originalCheckDepositTransaction`, `fundingEvent`, `seasoning`, `disputeReasons`, `enrichmentId`, `relatedTransactions`, `splitTransactions`, `permittedActions`.
 - Confirmed NOT to exist: `payee`, `counterparty`, `category`, `location`, `createdAt`, `date`, `pending`, `direction`, `statementDescriptor`.
+- `description` is **deprecated** in the published schema ("use memo instead"). It is still queryable and this SDK still maps it, but new code should read `memo`.
+- Input validation is strict: GraphQL rejects an input object containing any field the schema does not declare, so a mutation carrying an extra key fails outright rather than ignoring it. Input shapes here come from the published reference at <https://docs.trycrew.com/> and, unlike the query fields above, are **not** live-validated.
 
 ## Known unknowns
 

@@ -145,23 +145,28 @@ type CashTransaction struct {
 	// Title is the enriched payee/merchant display name (e.g. "Costco") —
 	// the name the Crew app shows. MerchantName and Description are often
 	// null on card transactions; prefer Title for display.
-	Title            string     `json:"title"`
-	Description      string     `json:"description"`
-	Status           string     `json:"status"`
-	Type             string     `json:"type"`
-	MCC              string     `json:"mcc"`
-	MerchantName     string     `json:"merchantName"`
-	MerchantAddress1 string     `json:"merchantAddress1"`
-	MerchantCity     string     `json:"merchantCity"`
-	MerchantState    string     `json:"merchantState"`
-	MerchantZip      string     `json:"merchantZip"`
-	MerchantCountry  string     `json:"merchantCountry"`
-	ImageURL         string     `json:"imageUrl"`
-	Note             string     `json:"note"`
-	Memo             string     `json:"memo"`
-	ExternalID       string     `json:"externalId"`
-	OccurredAt       time.Time  `json:"occurredAt"`
-	ClearedAt        *time.Time `json:"clearedAt"`
+	Title string `json:"title"`
+	// Deprecated: Crew's schema marks CashTransaction.description as
+	// deprecated ("use memo instead"). It is still queried and populated,
+	// but prefer Memo (or Payee for display) in new code.
+	Description      string `json:"description"`
+	Status           string `json:"status"`
+	Type             string `json:"type"`
+	MCC              string `json:"mcc"`
+	MerchantName     string `json:"merchantName"`
+	MerchantAddress1 string `json:"merchantAddress1"`
+	MerchantCity     string `json:"merchantCity"`
+	MerchantState    string `json:"merchantState"`
+	MerchantZip      string `json:"merchantZip"`
+	MerchantCountry  string `json:"merchantCountry"`
+	ImageURL         string `json:"imageUrl"`
+	// Note is the user's free-text annotation, set by UpdateCashTransaction.
+	Note string `json:"note"`
+	// Memo is the statement memo; it supersedes the deprecated Description.
+	Memo       string     `json:"memo"`
+	ExternalID string     `json:"externalId"`
+	OccurredAt time.Time  `json:"occurredAt"`
+	ClearedAt  *time.Time `json:"clearedAt"`
 	// Running balances (in cents) after this transaction settled.
 	SubaccountRunningTotalCents int64 `json:"subaccountRunningTotal"`
 	AccountRunningTotalCents    int64 `json:"accountRunningTotal"`
