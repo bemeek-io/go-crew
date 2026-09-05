@@ -199,3 +199,40 @@ func ExampleClient_Execute() {
 	}
 	fmt.Println(len(out.CurrentUser.Referrals.Edges))
 }
+
+// Example_freezeCard reads a card's freeze state and toggles it. Freezing
+// is a state machine, not a boolean: a card reports FREEZING or UNFREEZING
+// while the network catches up, so IsFrozen only reports the settled state.
+func Example_freezeCard() {
+	client := crew.NewClient(crew.WithToken(os.Getenv("CREW_TOKEN")))
+	ctx := context.Background()
+
+	// Card IDs come from the card listings — there is no lookup by number.
+	cards, err := client.DebitCards(ctx)
+	if err != nil {
+		panic(err)
+	}
+	if len(cards) == 0 {
+		return
+	}
+	card := cards[0]
+	fmt.Printf("%s ...%s: %s (%s)\n", card.Name, card.LastFour, card.FrozenStatus, card.FrozenReason)
+
+	if card.IsFrozen() {
+		unfrozen, err := client.UnfreezeDebitCard(ctx, card.ID)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("now", unfrozen.FrozenStatus)
+		return
+	}
+
+	// A reason is required; USER_REQUESTED is the ordinary "I lost sight of
+	// my card" freeze. Report it lost or stolen only if it really is — Crew
+	// treats those reasons differently.
+	frozen, err := client.FreezeDebitCard(ctx, card.ID, crew.CardFrozenReasonUserRequested)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("now", frozen.FrozenStatus)
+}
