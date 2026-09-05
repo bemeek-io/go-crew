@@ -181,6 +181,8 @@ A user with no household yields an empty ID and a **nil** error, so a blank resu
 | `ReassignCashTransaction(ctx, txID, subID)` | Move a transaction to another pocket. |
 | `SplitCashTransaction(ctx, in)` | Split a transaction across pockets. |
 
+Transactions belong to an **account**, not to the user. `CashTransactions` reads the spend account by default — that is where card activity and transfers land — and `opts.AccountID` points it at any other account from `Accounts`. Each page also reports `Total`, the count matching the filter rather than the count on the page. Backward paging needs both `Last` and `Before`; setting one alone returns `ErrBackwardPagination` without a round trip, because Crew answers a half-specified backward page with an HTTP 500.
+
 Each `CashTransaction` carries rich detail: use **`Payee()`** for the display name (the enriched `Title`, e.g. "Costco" — `MerchantName` and `Description` are usually null on card transactions), plus `MCC`, merchant address fields, `ImageURL` (merchant logo), `Note`/`Memo`, `OccurredAt`/`ClearedAt`, running balance totals, and the associated `Subaccount` and `DebitCard`. `Description` is deprecated in Crew's schema in favor of `Memo`.
 
 Only the note is user-editable: `UpdateCashTransaction` takes a `CashTransactionID` and a `Note`. Merchant details, amount, and status are set by Crew.
