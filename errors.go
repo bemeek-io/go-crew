@@ -22,6 +22,11 @@ var (
 	// ErrNotWatching is returned when an operation requires a running
 	// watcher.
 	ErrNotWatching = errors.New("crew: watcher not started")
+
+	// ErrBackwardPagination is returned when only one of Last and Before is
+	// set. Crew answers a half-specified backward page with HTTP 500 rather
+	// than a GraphQL error, so the SDK rejects it before sending.
+	ErrBackwardPagination = errors.New("crew: backward pagination requires both Last and Before")
 )
 
 // APIError wraps a non-2xx HTTP response from the Crew API.

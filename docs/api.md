@@ -4,6 +4,8 @@ Reverse-engineered notes on the Crew Finance consumer API, for anyone building a
 
 **Validation status:** confirmed against the live API (2026-08-16): the GraphQL endpoint, the full 4-step OTP auth flow at the `/willow/auth` base (settling the docs' `/willow/auth` vs `/willow/graphql/auth` inconsistency), bearer auth, the response envelope, the `currentUser` accounts/subaccounts query (`overallBalance`, `goal`), and the `cashTransactions` field names below. `CashTransaction` notably has **no** `createdAt` or `date` field — timestamps are `occurredAt` and nullable `clearedAt`; `subaccount` and `debitCard` are nested objects, not ID scalars; and the connection's filter argument is `searchFilters`, not `filter`. Mutation input shapes and transfer fields still come from Crew's docs and have not been exercised live — but they were reconciled field-by-field against that reference on 2026-08-17, which corrected a number of names this SDK had guessed wrong (see "Input shapes" below).
 
+**Schema drift, 2026-09-05:** Crew moved `cashTransactions` off `User` (see "Type-name traps"), dropped `transferSide` from `CashTransactionFilter`, and `IntegerRange` now takes `gt`/`gte`/`lt`/`lte` instead of `min`/`max`. The published docs at `docs.trycrew.com` still describe the old shape, so they lag the live schema; where the two disagree, the live endpoint wins. Introspection stays disabled with a valid token (`{"errors":[{"message":"forbidden"}]}`), but the server's validation errors carry `Did you mean …` suggestions, which is enough to enumerate a type's fields by probing bogus ones.
+
 ## Base URLs
 
 | Purpose | URL |
@@ -43,12 +45,17 @@ If step 2 reports `"isSingleFactor": true`, steps 3–4 are unnecessary.
 
 ## Pagination
 
-Relay cursor connections: arguments `first`, `last`, `after`, `before`, plus an optional `searchFilters` input (validated on `cashTransactions`; assumed on `transfers`); responses carry `edges { node }` and `pageInfo { startCursor endCursor hasNextPage hasPreviousPage }`.
+Relay cursor connections: arguments `first`, `last`, `after`, `before`, plus an optional `searchFilters` input (validated on `cashTransactions`; assumed on `transfers`); responses carry `edges { cursor node }`, `pageInfo { startCursor endCursor hasNextPage hasPreviousPage }`, and `total` (the count matching the filter, not the page — note it is `total`, not the Relay-conventional `totalCount`).
+
+**Backward pagination needs both `last` and `before`.** Supplying either alone returns HTTP 500 with the non-GraphQL body `{"errors":{"detail":"Internal Server Error"}}` — the server does not answer with a GraphQL error, so there is nothing useful to parse. Confirmed 2026-09-05.
 
 Known filters:
 
-- `CashTransactionFilter`: `amount` (range), `debitCardId`, `fuzzySearch`, `subaccountId`, `subaccountIds`, `transferSide`, `type`
+- `CashTransactionFilter`: `amount` (`IntegerRange`), `amount_v2` (`[IntegerRange]`), `debitCardId` (`[ID!]`), `fuzzySearch`, `matching_name` (`StringFilter`), `occurred_at` (`DateRange`), `subaccountId`, `subaccountIds`, `type` (`CashTransactionType`), `user_id` (`[ID!]`)
+- `IntegerRange`: `gt`, `gte`, `lt`, `lte` — **not** `min`/`max`
 - `TransferFilter`: `status`
+
+`CashTransactionFilter` no longer has a `transferSide` member, and no replacement direction filter exists — filter debits client-side on the sign of `amount`.
 
 ## Operations used by this SDK
 
@@ -65,9 +72,20 @@ query CurrentUserFamilyID { currentUser { accounts { family { id } } } }
 
 query CashTransactions($first: Int, $last: Int, $after: String, $before: String, $filter: CashTransactionFilter) {
   currentUser {
-    cashTransactions(first: $first, last: $last, after: $after, before: $before, searchFilters: $filter) {
-      edges { node { id amount title description status type mcc merchantName merchantAddress1 merchantCity merchantState merchantZip merchantCountry imageUrl note memo externalId occurredAt clearedAt subaccountRunningTotal accountRunningTotal subaccount { id name } debitCard { id } } }
-      pageInfo { startCursor endCursor hasNextPage hasPreviousPage }
+    spendAccount {
+      cashTransactions(first: $first, last: $last, after: $after, before: $before, searchFilters: $filter) {
+        total
+        edges { node { id amount title description status type mcc merchantName merchantAddress1 merchantCity merchantState merchantZip merchantCountry imageUrl note memo externalId occurredAt clearedAt subaccountRunningTotal accountRunningTotal subaccount { id name } debitCard { id } } }
+        pageInfo { startCursor endCursor hasNextPage hasPreviousPage }
+      }
+    }
+  }
+}
+
+query AccountCashTransactions($accountId: ID!, $first: Int, $last: Int, $after: String, $before: String, $filter: CashTransactionFilter) {
+  node(id: $accountId) {
+    ... on Account {
+      cashTransactions(first: $first, last: $last, after: $after, before: $before, searchFilters: $filter) { ...same as above }
     }
   }
 }
@@ -120,10 +138,11 @@ Enum values: `CardFrozenReason` = FRAUD_DETECTED, FROZEN_BY_BANK, LOST_OR_STOLEN
 
 ## Type-name traps
 
+- **`cashTransactions` is not on `User`.** It hangs off `Account` and `Subaccount` (`Account.cashTransactions`, `Subaccount.cashTransactions`), plus `DebitCard.transactions` — which returns the same `CashTransactionConnection` but takes no `searchFilters`. `currentUser { cashTransactions }` is a hard schema error: *Cannot query field "cashTransactions" on type "User". Did you mean "cashTransactionDeclines"?* Reach for `currentUser.spendAccount`; the other accounts report `total: 0`. There is no root `account(id:)` field, so a specific account is fetched through `node(id:)` with an `... on Account` fragment.
 - **There is no `VirtualDebitCard` type.** `currentUser.virtualDebitCards` returns `[DebitCard!]!`, as do all the card mutations. Virtual cards are `DebitCard`s whose `formFactor` is `VIRTUAL` or `SINGLE_USE`.
 - **`DebitCard` field names**: `lastFour` (not `last4`), `name` (not `nickname`), and freezing is `frozenStatus` + `frozenReason` (not a `frozen` boolean).
 - **`Subaccount.type` is an `AccountType`** — the parent account's kind. The pocket's own kind is `subaccountType: SubaccountType!`.
-- **`currentUser.transfers` takes no `searchFilters` argument**, only `first`/`last`/`after`/`before`. `TransferFilter` applies to the account-level `transfersFrom`/`transfersTo` connections. By contrast `currentUser.cashTransactions` *does* accept `searchFilters`.
+- **`currentUser.transfers` takes no `searchFilters` argument**, only `first`/`last`/`after`/`before`. `TransferFilter` applies to the account-level `transfersFrom`/`transfersTo` connections. By contrast `Account.cashTransactions` *does* accept `searchFilters`.
 - **`CashTransactionFilter.debitCardId` is `[ID!]`**, a list despite the singular name.
 - **`Account.family` is `Family!`** and is the same object for every account in one household, which makes its ID a household identifier. `Family` exposes no `name` — only `id` is worth carrying. `User.family` also exists but is nullable (`Family`), so the account route is the reliable one.
 - **A card's spending pocket lives in three different places**, consulted in this order:

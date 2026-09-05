@@ -7,11 +7,33 @@ import (
 
 const cashTransactionFields = `id amount title description status type mcc merchantName merchantAddress1 merchantCity merchantState merchantZip merchantCountry imageUrl note memo externalId occurredAt clearedAt subaccountRunningTotal accountRunningTotal subaccount { id name } debitCard { id }`
 
+// Cash transactions hang off an account, not off the user. Crew moved the
+// connection down from currentUser to Account and Subaccount, and asking
+// for it on User is now a hard schema error rather than an empty result.
+// The spend account is the default because that is where card activity and
+// transfers land; the other accounts report zero.
 const queryCashTransactions = `query CashTransactions($first: Int, $last: Int, $after: String, $before: String, $filter: CashTransactionFilter) {
   currentUser {
-    cashTransactions(first: $first, last: $last, after: $after, before: $before, searchFilters: $filter) {
-      edges { node { ` + cashTransactionFields + ` } }
-      pageInfo { startCursor endCursor hasNextPage hasPreviousPage }
+    spendAccount {
+      cashTransactions(first: $first, last: $last, after: $after, before: $before, searchFilters: $filter) {
+        total
+        edges { node { ` + cashTransactionFields + ` } }
+        pageInfo { startCursor endCursor hasNextPage hasPreviousPage }
+      }
+    }
+  }
+}`
+
+// Any other account is reached through the Relay node interface: there is
+// no root account(id:) field.
+const queryAccountCashTransactions = `query AccountCashTransactions($accountId: ID!, $first: Int, $last: Int, $after: String, $before: String, $filter: CashTransactionFilter) {
+  node(id: $accountId) {
+    ... on Account {
+      cashTransactions(first: $first, last: $last, after: $after, before: $before, searchFilters: $filter) {
+        total
+        edges { node { ` + cashTransactionFields + ` } }
+        pageInfo { startCursor endCursor hasNextPage hasPreviousPage }
+      }
     }
   }
 }`
@@ -19,7 +41,12 @@ const queryCashTransactions = `query CashTransactions($first: Int, $last: Int, $
 // CashTransactionsOptions control pagination and filtering for
 // CashTransactions.
 type CashTransactionsOptions struct {
-	First  int
+	// AccountID scopes the page to one account. Empty means the spend
+	// account, which holds the card and transfer activity; pass an ID from
+	// Accounts to read a different one.
+	AccountID string
+	First     int
+	// Last and Before page backwards and must be set together.
 	Last   int
 	After  string
 	Before string
@@ -30,6 +57,9 @@ type CashTransactionsOptions struct {
 type CashTransactionPage struct {
 	Transactions []CashTransaction
 	PageInfo     PageInfo
+	// Total counts every transaction matching the filter, not just this
+	// page.
+	Total int
 }
 
 type connection[T any] struct {
@@ -37,6 +67,8 @@ type connection[T any] struct {
 		Node T `json:"node"`
 	} `json:"edges"`
 	PageInfo PageInfo `json:"pageInfo"`
+	// Total is zero unless the query selected it.
+	Total int `json:"total"`
 }
 
 func (c connection[T]) nodes() []T {
@@ -69,28 +101,50 @@ func connectionVariables(first, last int, after, before string, filter any) map[
 	return vars
 }
 
-// CashTransactions fetches one page of the user's cash transactions,
-// newest first.
+// CashTransactions fetches one page of cash transactions, newest first,
+// from the spend account or from opts.AccountID.
 func (c *Client) CashTransactions(ctx context.Context, opts CashTransactionsOptions) (*CashTransactionPage, error) {
-	var out struct {
-		CurrentUser struct {
-			CashTransactions connection[CashTransaction] `json:"cashTransactions"`
-		} `json:"currentUser"`
+	if (opts.Last > 0) != (opts.Before != "") {
+		return nil, ErrBackwardPagination
 	}
 	var filter any
 	if opts.Filter != nil {
 		filter = opts.Filter
 	}
 	vars := connectionVariables(opts.First, opts.Last, opts.After, opts.Before, filter)
-	if err := c.Execute(ctx, queryCashTransactions, vars, &out); err != nil {
-		return nil, err
+
+	var conn connection[CashTransaction]
+	if opts.AccountID != "" {
+		vars["accountId"] = opts.AccountID
+		var out struct {
+			Node struct {
+				CashTransactions connection[CashTransaction] `json:"cashTransactions"`
+			} `json:"node"`
+		}
+		if err := c.Execute(ctx, queryAccountCashTransactions, vars, &out); err != nil {
+			return nil, err
+		}
+		conn = out.Node.CashTransactions
+	} else {
+		var out struct {
+			CurrentUser struct {
+				SpendAccount struct {
+					CashTransactions connection[CashTransaction] `json:"cashTransactions"`
+				} `json:"spendAccount"`
+			} `json:"currentUser"`
+		}
+		if err := c.Execute(ctx, queryCashTransactions, vars, &out); err != nil {
+			return nil, err
+		}
+		conn = out.CurrentUser.SpendAccount.CashTransactions
 	}
-	conn := out.CurrentUser.CashTransactions
-	return &CashTransactionPage{Transactions: conn.nodes(), PageInfo: conn.PageInfo}, nil
+	return &CashTransactionPage{Transactions: conn.nodes(), PageInfo: conn.PageInfo, Total: conn.Total}, nil
 }
 
-// AllCashTransactions iterates every cash transaction, fetching pages of 100
-// as needed. Iteration stops after yielding a non-nil error.
+// AllCashTransactions iterates every cash transaction in the spend account,
+// fetching pages of 100 as needed. Iteration stops after yielding a non-nil
+// error. To walk a different account, page CashTransactions yourself with an
+// AccountID set.
 func (c *Client) AllCashTransactions(ctx context.Context, filter *CashTransactionFilter) iter.Seq2[CashTransaction, error] {
 	return func(yield func(CashTransaction, error) bool) {
 		after := ""

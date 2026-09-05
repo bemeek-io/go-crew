@@ -297,10 +297,11 @@ func txPageJSON(hasNext bool, endCursor string, txs ...string) string {
 	for i, tx := range txs {
 		edges[i] = `{"node":` + tx + `}`
 	}
-	return `{"data":{"currentUser":{"cashTransactions":{
+	return `{"data":{"currentUser":{"spendAccount":{"cashTransactions":{
+		"total":42,
 		"edges":[` + strings.Join(edges, ",") + `],
 		"pageInfo":{"startCursor":"s","endCursor":"` + endCursor + `","hasNextPage":` + boolStr(hasNext) + `,"hasPreviousPage":false}
-	}}}}`
+	}}}}}`
 }
 
 func boolStr(b bool) string {
@@ -328,13 +329,62 @@ func TestCashTransactions(t *testing.T) {
 	if page.PageInfo.EndCursor != "c1" || page.PageInfo.HasNextPage {
 		t.Errorf("pageInfo = %+v", page.PageInfo)
 	}
-	vars := f.lastRequest().Variables
+	if page.Total != 42 {
+		t.Errorf("total = %d, want 42", page.Total)
+	}
+	req := f.lastRequest()
+	if !strings.Contains(req.Query, "spendAccount") {
+		t.Errorf("query does not read through spendAccount:\n%s", req.Query)
+	}
+	vars := req.Variables
 	if vars["first"] != float64(10) {
 		t.Errorf("first = %v, want 10", vars["first"])
 	}
 	filter := vars["filter"].(map[string]any)
 	if filter["subaccountId"] != "sub-1" {
 		t.Errorf("filter = %v", filter)
+	}
+}
+
+func TestCashTransactionsByAccount(t *testing.T) {
+	c, f := newTestServer(t)
+	f.setGQL("cashTransactions", `{"data":{"node":{"cashTransactions":{
+		"total":7,
+		"edges":[{"node":{"id":"tx-9","amount":-100}}],
+		"pageInfo":{"startCursor":"s","endCursor":"c9","hasNextPage":false,"hasPreviousPage":false}
+	}}}}`)
+
+	page, err := c.CashTransactions(context.Background(), CashTransactionsOptions{
+		AccountID: "acct-7",
+		First:     5,
+	})
+	if err != nil {
+		t.Fatalf("CashTransactions: %v", err)
+	}
+	if len(page.Transactions) != 1 || page.Transactions[0].ID != "tx-9" || page.Total != 7 {
+		t.Errorf("page = %+v", page)
+	}
+	req := f.lastRequest()
+	if !strings.Contains(req.Query, "node(id: $accountId)") {
+		t.Errorf("query does not read through node():\n%s", req.Query)
+	}
+	if req.Variables["accountId"] != "acct-7" {
+		t.Errorf("accountId = %v", req.Variables["accountId"])
+	}
+}
+
+// Crew answers a half-specified backward page with HTTP 500, so the SDK
+// refuses to send one.
+func TestCashTransactionsRejectsHalfBackwardPage(t *testing.T) {
+	c, f := newTestServer(t)
+	f.setGQL("cashTransactions", txPageJSON(false, "c1"))
+	for _, opts := range []CashTransactionsOptions{{Last: 5}, {Before: "c1"}} {
+		if _, err := c.CashTransactions(context.Background(), opts); !errors.Is(err, ErrBackwardPagination) {
+			t.Errorf("CashTransactions(%+v) error = %v, want ErrBackwardPagination", opts, err)
+		}
+	}
+	if _, err := c.CashTransactions(context.Background(), CashTransactionsOptions{Last: 5, Before: "c1"}); errors.Is(err, ErrBackwardPagination) {
+		t.Error("Last+Before together should be allowed")
 	}
 }
 

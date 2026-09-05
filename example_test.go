@@ -66,15 +66,18 @@ func Example_transactions() {
 	client := crew.NewClient(crew.WithToken(os.Getenv("CREW_TOKEN")))
 	ctx := context.Background()
 
+	// Transactions live on an account, not on the user; an empty AccountID
+	// reads the spend account, which is where card activity lands.
 	page, err := client.CashTransactions(ctx, crew.CashTransactionsOptions{First: 10})
 	if err != nil {
 		panic(err)
 	}
+	fmt.Println("total:", page.Total)
 	for _, tx := range page.Transactions {
 		fmt.Printf("%s %d %s\n", tx.ID, tx.AmountCents, tx.Payee())
 	}
 
-	for tx, err := range client.AllCashTransactions(ctx, &crew.CashTransactionFilter{TransferSide: crew.TransferSideDebit}) {
+	for tx, err := range client.AllCashTransactions(ctx, &crew.CashTransactionFilter{Type: "CARD"}) {
 		if err != nil {
 			panic(err)
 		}

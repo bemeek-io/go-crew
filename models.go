@@ -207,17 +207,6 @@ const (
 
 func (d TargetBalanceSettingDirection) String() string { return string(d) }
 
-// TransferSide filters transactions by direction.
-type TransferSide string
-
-// Transfer sides.
-const (
-	TransferSideCredit TransferSide = "CREDIT"
-	TransferSideDebit  TransferSide = "DEBIT"
-)
-
-func (s TransferSide) String() string { return string(s) }
-
 // User is the authenticated Crew user.
 type User struct {
 	ID        string    `json:"id"`
@@ -439,20 +428,24 @@ type PageInfo struct {
 	HasPreviousPage bool   `json:"hasPreviousPage"`
 }
 
-// IntegerRange bounds an integer filter field.
+// IntegerRange bounds an integer filter field. Bounds are exclusive (Gt,
+// Lt) or inclusive (Gte, Lte); set only the ones you need. Amounts are
+// signed cents, so spending is negative — Lte(-1000) means "at least $10
+// out", not "at most $10".
 type IntegerRange struct {
-	Min *int64 `json:"min,omitempty"`
-	Max *int64 `json:"max,omitempty"`
+	Gt  *int64 `json:"gt,omitempty"`
+	Gte *int64 `json:"gte,omitempty"`
+	Lt  *int64 `json:"lt,omitempty"`
+	Lte *int64 `json:"lte,omitempty"`
 }
 
 // CashTransactionFilter narrows a cash transaction query server-side.
 type CashTransactionFilter struct {
 	Amount *IntegerRange `json:"amount,omitempty"`
 	// DebitCardIDs serializes to the schema's list-typed debitCardId field.
-	DebitCardIDs  []string     `json:"debitCardId,omitempty"`
-	FuzzySearch   string       `json:"fuzzySearch,omitempty"`
-	SubaccountID  string       `json:"subaccountId,omitempty"`
-	SubaccountIDs []string     `json:"subaccountIds,omitempty"`
-	TransferSide  TransferSide `json:"transferSide,omitempty"`
-	Type          string       `json:"type,omitempty"`
+	DebitCardIDs  []string `json:"debitCardId,omitempty"`
+	FuzzySearch   string   `json:"fuzzySearch,omitempty"`
+	SubaccountID  string   `json:"subaccountId,omitempty"`
+	SubaccountIDs []string `json:"subaccountIds,omitempty"`
+	Type          string   `json:"type,omitempty"`
 }
